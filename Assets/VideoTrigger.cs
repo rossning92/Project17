@@ -49,18 +49,16 @@ public class VideoTrigger : MonoBehaviour {
 
 	static void SwitchToVideoCamera ()
 	{
-		Camera mainCamera = GameObject.FindGameObjectWithTag ("MainCamera").GetComponent<Camera> ();
-		Camera vidCamera = GameObject.FindGameObjectWithTag ("360VideoCamera").GetComponent<Camera> ();
-		mainCamera.enabled = false;
-		vidCamera.enabled = true;
+		DemoApp app = FindObjectOfType<DemoApp> ();
+		//app.mainCamera.SetActive (false);
+		app.videoCamera.SetActive (true);
 	}
 
 	static void SwitchToMainCamera ()
 	{
-		Camera mainCamera = GameObject.FindGameObjectWithTag ("MainCamera").GetComponent<Camera> ();
-		Camera vidCamera = GameObject.FindGameObjectWithTag ("360VideoCamera").GetComponent<Camera> ();
-		mainCamera.enabled = true;
-		vidCamera.enabled = false;
+		DemoApp app = FindObjectOfType<DemoApp> ();
+		//app.mainCamera.SetActive (true);
+		app.videoCamera.SetActive (false);
 	}
 
 	// Update is called once per frame
