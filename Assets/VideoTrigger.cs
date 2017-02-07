@@ -6,6 +6,7 @@ using RenderHeads.Media.AVProVideo;
 public class VideoTrigger : MonoBehaviour {
 	private float fadeTextureAlpha = 0.0f;
 	public float fadeSpeed = 2.0f;
+	public string videoFile;
 
 	private enum Status
 	{
@@ -22,6 +23,7 @@ public class VideoTrigger : MonoBehaviour {
 
 	public Texture fadeTexture;
 
+	private MediaPlayer mediaPlayer;
 
 
 	void FadeIn() {
@@ -34,7 +36,7 @@ public class VideoTrigger : MonoBehaviour {
 
 	// Use this for initialization
 	void Start () {
-		
+		mediaPlayer = (MediaPlayer)FindObjectOfType (typeof(MediaPlayer));
 	}
 
 	void OnGUI() {
@@ -47,14 +49,19 @@ public class VideoTrigger : MonoBehaviour {
 	
 	}
 
-	static void SwitchToVideoCamera ()
+	void SwitchToVideoCamera ()
 	{
 		DemoApp app = FindObjectOfType<DemoApp> ();
 		//app.mainCamera.SetActive (false);
 		app.videoCamera.SetActive (true);
+
+		mediaPlayer.OpenVideoFromFile (
+			MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, 
+			videoFile);
+		mediaPlayer.Play ();
 	}
 
-	static void SwitchToMainCamera ()
+	void SwitchToMainCamera ()
 	{
 		DemoApp app = FindObjectOfType<DemoApp> ();
 		//app.mainCamera.SetActive (true);
