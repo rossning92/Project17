@@ -4,7 +4,7 @@ using UnityEngine;
 using RenderHeads.Media.AVProVideo;
 
 public class VideoTrigger : MonoBehaviour {
-	private float fadeTextureAlpha = 0.0f;
+	
 	public float fadeSpeed = 2.0f;
 	public string videoFile;
 
@@ -17,29 +17,29 @@ public class VideoTrigger : MonoBehaviour {
 		VideoCameraFadeOut,
 		MainCameraFadeIn
 	};
-	private Status status = Status.InMainCamera;
-	private bool areaEntered = false;
-	private bool areaExited = false;
+	private Status _status = Status.InMainCamera;
+	private bool _areaEntered = false;
+	private bool _areaExited = false;
 
 
-	private MediaPlayer mediaPlayer;
+	private MediaPlayer _mediaPlayer;
 	private DemoApp _app;
-
+	private float _fadeTextureAlpha = 0.0f;
 
 	void Fade(GameObject obj, bool fadeOut) {
 		if (fadeOut) {
-			fadeTextureAlpha += Time.deltaTime * fadeSpeed;
+			_fadeTextureAlpha += Time.deltaTime * fadeSpeed;
 		} else {
-			fadeTextureAlpha -= Time.deltaTime * fadeSpeed;
+			_fadeTextureAlpha -= Time.deltaTime * fadeSpeed;
 		}
 
 		FadeEffect fadeEffect = obj.GetComponentInChildren<FadeEffect> ();
-		fadeEffect.SetAlpha (fadeTextureAlpha);
+		fadeEffect.SetAlpha (_fadeTextureAlpha);
 	}
 
 	// Use this for initialization
 	void Start () {
-		mediaPlayer = (MediaPlayer)FindObjectOfType (typeof(MediaPlayer));
+		_mediaPlayer = (MediaPlayer)FindObjectOfType (typeof(MediaPlayer));
 		_app = FindObjectOfType<DemoApp> ();
 	}
 
@@ -49,10 +49,10 @@ public class VideoTrigger : MonoBehaviour {
 		//app.mainCamera.SetActive (false);
 		app.videoCamera.SetActive (true);
 
-		mediaPlayer.OpenVideoFromFile (
+		_mediaPlayer.OpenVideoFromFile (
 			MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, 
 			videoFile);
-		mediaPlayer.Play ();
+		_mediaPlayer.Play ();
 	}
 
 	void SwitchToMainCamera ()
@@ -64,50 +64,50 @@ public class VideoTrigger : MonoBehaviour {
 
 	// Update is called once per frame
 	void Update () {
-		if (status == Status.InMainCamera) {
+		if (_status == Status.InMainCamera) {
 			
-			if (areaEntered) {
-				areaEntered = false;
-				status = Status.MainCameraFadeOut;
+			if (_areaEntered) {
+				_areaEntered = false;
+				_status = Status.MainCameraFadeOut;
 			}
 
-		} else if (status == Status.MainCameraFadeOut) {
+		} else if (_status == Status.MainCameraFadeOut) {
 			
-			if (fadeTextureAlpha >= 1.0f) {
+			if (_fadeTextureAlpha >= 1.0f) {
 				SwitchToVideoCamera ();
-				status = Status.VideoCameraFadeIn;
+				_status = Status.VideoCameraFadeIn;
 			} else {
 				Fade (_app.mainCamera, true);
 			}
 
-		} else if (status == Status.VideoCameraFadeIn) {
+		} else if (_status == Status.VideoCameraFadeIn) {
 			
-			if (fadeTextureAlpha <= 0.0f) {
-				status = Status.InVideoCamera;
+			if (_fadeTextureAlpha <= 0.0f) {
+				_status = Status.InVideoCamera;
 			} else {
 				Fade (_app.videoCamera, false);
 			}
 
-		} else if (status == Status.InVideoCamera) {
+		} else if (_status == Status.InVideoCamera) {
 
-			if (areaExited) {
-				areaExited = false;
-				status = Status.VideoCameraFadeOut;
+			if (_areaExited) {
+				_areaExited = false;
+				_status = Status.VideoCameraFadeOut;
 			}
 
-		} else if (status == Status.VideoCameraFadeOut) {
+		} else if (_status == Status.VideoCameraFadeOut) {
 
-			if (fadeTextureAlpha >= 1.0f) {
+			if (_fadeTextureAlpha >= 1.0f) {
 				SwitchToMainCamera ();
-				status = Status.MainCameraFadeIn;
+				_status = Status.MainCameraFadeIn;
 			} else {
 				Fade (_app.videoCamera, true);
 			}
 
-		} else if (status == Status.MainCameraFadeIn) {
+		} else if (_status == Status.MainCameraFadeIn) {
 
-			if (fadeTextureAlpha <= 0.0f) {
-				status = Status.InMainCamera;
+			if (_fadeTextureAlpha <= 0.0f) {
+				_status = Status.InMainCamera;
 			} else {
 				Fade (_app.mainCamera, false);
 			}
@@ -117,18 +117,14 @@ public class VideoTrigger : MonoBehaviour {
 	}
 
 	void OnTriggerEnter(Collider other) {
+		_areaEntered = true;
 
-		// Destroy(gameObject);
-		// MediaPlayer mediaPlayer = (MediaPlayer)FindObjectOfType(typeof(MediaPlayer));
-		// mediaPlayer.Stop ();
-
-		areaEntered = true;
-
+		Debug.Log ("Enter");
 	}
 
 	void OnTriggerExit(Collider other) {
+		_areaExited = true;
 
-		areaExited = true;
-
+		Debug.Log ("Exit");
 	}
 }
