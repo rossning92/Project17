@@ -1,22 +1,14 @@
 fileFormatVersion: 2
-guid: 090579dcca5bbb342b3c3723130d23f8
-timeCreated: 1486493660
+guid: 2a98efd645987a240b20ce3f60e1395b
+timeCreated: 1486501766
 licenseType: Pro
 ModelImporter:
   serializedVersion: 19
   fileIDToRecycleName:
-    100000: Camera
-    100002: //RootNode
-    100004: Lamp
-    100006: Sphere
-    400000: Camera
-    400002: //RootNode
-    400004: Lamp
-    400006: Sphere
-    2300000: Sphere
-    2300002: //RootNode
-    3300000: Sphere
-    3300002: //RootNode
+    100000: //RootNode
+    400000: //RootNode
+    2300000: //RootNode
+    3300000: //RootNode
     4300000: Sphere
   materials:
     importMaterials: 1
