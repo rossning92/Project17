@@ -21,32 +21,26 @@ public class VideoTrigger : MonoBehaviour {
 	private bool areaEntered = false;
 	private bool areaExited = false;
 
-	public Texture fadeTexture;
 
 	private MediaPlayer mediaPlayer;
+	private DemoApp _app;
 
 
-	void FadeIn() {
-		fadeTextureAlpha -= Mathf.Clamp01(Time.deltaTime * fadeSpeed);
-	}
+	void Fade(GameObject obj, bool fadeOut) {
+		if (fadeOut) {
+			fadeTextureAlpha += Time.deltaTime * fadeSpeed;
+		} else {
+			fadeTextureAlpha -= Time.deltaTime * fadeSpeed;
+		}
 
-	void FadeOut() {
-		fadeTextureAlpha += Mathf.Clamp01(Time.deltaTime * fadeSpeed);
+		FadeEffect fadeEffect = obj.GetComponentInChildren<FadeEffect> ();
+		fadeEffect.SetAlpha (fadeTextureAlpha);
 	}
 
 	// Use this for initialization
 	void Start () {
 		mediaPlayer = (MediaPlayer)FindObjectOfType (typeof(MediaPlayer));
-	}
-
-	void OnGUI() {
-
-		if (status == Status.InMainCamera || status == Status.InVideoCamera)
-			return;
-
-		GUI.color = new Color(fadeTextureAlpha, fadeTextureAlpha, fadeTextureAlpha, fadeTextureAlpha);
-		GUI.DrawTexture( new Rect(0, 0, Screen.width, Screen.height ), fadeTexture );
-	
+		_app = FindObjectOfType<DemoApp> ();
 	}
 
 	void SwitchToVideoCamera ()
@@ -83,7 +77,7 @@ public class VideoTrigger : MonoBehaviour {
 				SwitchToVideoCamera ();
 				status = Status.VideoCameraFadeIn;
 			} else {
-				FadeOut ();
+				Fade (_app.mainCamera, true);
 			}
 
 		} else if (status == Status.VideoCameraFadeIn) {
@@ -91,7 +85,7 @@ public class VideoTrigger : MonoBehaviour {
 			if (fadeTextureAlpha <= 0.0f) {
 				status = Status.InVideoCamera;
 			} else {
-				FadeIn ();
+				Fade (_app.videoCamera, false);
 			}
 
 		} else if (status == Status.InVideoCamera) {
@@ -107,7 +101,7 @@ public class VideoTrigger : MonoBehaviour {
 				SwitchToMainCamera ();
 				status = Status.MainCameraFadeIn;
 			} else {
-				FadeOut ();
+				Fade (_app.videoCamera, true);
 			}
 
 		} else if (status == Status.MainCameraFadeIn) {
@@ -115,7 +109,7 @@ public class VideoTrigger : MonoBehaviour {
 			if (fadeTextureAlpha <= 0.0f) {
 				status = Status.InMainCamera;
 			} else {
-				FadeIn ();
+				Fade (_app.mainCamera, false);
 			}
 
 		}
