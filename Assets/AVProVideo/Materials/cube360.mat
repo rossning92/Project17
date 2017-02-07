@@ -7,9 +7,8 @@ Material:
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
   m_Name: cube360
-  m_Shader: {fileID: 10752, guid: 0000000000000000f000000000000000, type: 0}
-  m_ShaderKeywords:
-  - STEREO_NONE
+  m_Shader: {fileID: 4800000, guid: eb44a525a7e2c6640a8cd90fd7fabce4, type: 3}
+  m_ShaderKeywords: []
   m_CustomRenderQueue: -1
   m_SavedProperties:
     serializedVersion: 2
@@ -29,6 +28,10 @@ Material:
       data:
         first:
           name: _StereoDebug
+        second: 0
+      data:
+        first:
+          name: _ApplyGamma
         second: 0
     m_Colors:
       data:

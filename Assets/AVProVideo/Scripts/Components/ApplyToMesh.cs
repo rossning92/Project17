@@ -1,22 +1,40 @@
+#if UNITY_EDITOR || UNITY_STANDALONE_OSX || UNITY_STANDALONE_WIN
+	#define UNITY_PLATFORM_SUPPORTS_LINEAR
+#endif
+
 using UnityEngine;
-using System.Collections;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserverd.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo
 {
-	[AddComponentMenu("AVPro Video/Apply To Mesh")]
+	[AddComponentMenu("AVPro Video/Apply To Mesh", 300)]
 	public class ApplyToMesh : MonoBehaviour 
 	{
+		// TODO: add specific material / material index to target in the mesh if there are multiple materials
 		public Vector2 _offset = Vector2.zero;
 		public Vector2 _scale = Vector2.one;
-		public MeshRenderer _mesh;
+		public Renderer _mesh;
 		public MediaPlayer _media;
 		public Texture2D _defaultTexture;
+		private static int _propStereo;
+		private static int _propAlphaPack;
+		private static int _propApplyGamma;
 
-		void Update()
+		void Awake()
+		{
+			if (_propStereo == 0 || _propAlphaPack == 0)
+			{
+				_propStereo = Shader.PropertyToID("Stereo");
+				_propAlphaPack = Shader.PropertyToID("AlphaPack");
+				_propApplyGamma = Shader.PropertyToID("_ApplyGamma");
+			}
+		}
+
+		// We do a LateUpdate() to allow for any changes in the texture that may have happened in Update()
+		void LateUpdate()
 		{
 			bool applied = false;
 			if (_media != null && _media.TextureProducer != null)
@@ -37,33 +55,55 @@ namespace RenderHeads.Media.AVProVideo
 		
 		private void ApplyMapping(Texture texture, bool requiresYFlip)
 		{
-			if (_mesh != null && _mesh.materials != null)
+			if (_mesh != null)
 			{
-				for (int i = 0; i < _mesh.materials.Length; i++)
+				Material[] meshMaterials = _mesh.materials;
+				if (meshMaterials != null)
 				{
-					Material mat = _mesh.materials[i];
-					if( mat != null )
+					for (int i = 0; i < meshMaterials.Length; i++)
 					{
-						mat.mainTexture = texture;
-
-						if (texture != null )
+						Material mat = meshMaterials[i];
+						if (mat != null)
 						{
-							if (requiresYFlip)
-							{
-								mat.mainTextureScale = new Vector2(_scale.x, -_scale.y);
-								mat.mainTextureOffset = Vector2.up + _offset;
-							}
-							else
-							{
-								mat.mainTextureScale = _scale;
-								mat.mainTextureOffset = _offset;
-							}
-						}
+							mat.mainTexture = texture;
 
-						// Apply changes for stereo videos
-						if (mat.shader.name == "Unlit/InsideSphere" && _media != null)
-						{
-							Helper.SetupStereoMaterial(mat, _media.m_StereoPacking, _media.m_DisplayDebugStereoColorTint);
+							if (texture != null)
+							{
+								if (requiresYFlip)
+								{
+									mat.mainTextureScale = new Vector2(_scale.x, -_scale.y);
+									mat.mainTextureOffset = Vector2.up + _offset;
+								}
+								else
+								{
+									mat.mainTextureScale = _scale;
+									mat.mainTextureOffset = _offset;
+								}
+							}
+
+
+							if (_media != null)
+							{
+								// Apply changes for stereo videos
+								if (mat.HasProperty(_propStereo))
+								{
+									Helper.SetupStereoMaterial(mat, _media.m_StereoPacking, _media.m_DisplayDebugStereoColorTint);
+								}
+								// Apply changes for alpha videos
+								if (mat.HasProperty(_propAlphaPack))
+								{
+									Helper.SetupAlphaPackedMaterial(mat, _media.m_AlphaPacking);
+								}
+#if UNITY_PLATFORM_SUPPORTS_LINEAR
+								// Apply gamma
+								if (mat.HasProperty(_propApplyGamma) && _media.Info != null)
+								{
+									Helper.SetupGammaMaterial(mat, _media.Info.PlayerSupportsLinearColorSpace());
+								}
+#else
+								_propApplyGamma |= 0;
+#endif
+							}
 						}
 					}
 				}
@@ -83,7 +123,7 @@ namespace RenderHeads.Media.AVProVideo
 			
 			if (_mesh != null)
 			{
-				Update();
+				LateUpdate();
 			}
 		}
 		

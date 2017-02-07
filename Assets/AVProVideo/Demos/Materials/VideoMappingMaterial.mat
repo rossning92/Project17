@@ -7,8 +7,10 @@ Material:
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
   m_Name: VideoMappingMaterial
-  m_Shader: {fileID: 7, guid: 0000000000000000f000000000000000, type: 0}
-  m_ShaderKeywords: []
+  m_Shader: {fileID: 4800000, guid: 06b0cff0150d7eb41b3d269f7e11daa3, type: 3}
+  m_ShaderKeywords:
+  - ALPHAPACK_LEFT_RIGHT
+  - STEREO_NONE
   m_CustomRenderQueue: 2000
   m_SavedProperties:
     serializedVersion: 2
@@ -109,6 +111,10 @@ Material:
         first:
           name: _ColorMask
         second: 15
+      data:
+        first:
+          name: AlphaPack
+        second: 0
       data:
         first:
           name: _SrcBlend

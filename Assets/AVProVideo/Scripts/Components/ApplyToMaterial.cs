@@ -1,13 +1,16 @@
+#if UNITY_EDITOR || UNITY_STANDALONE_OSX || UNITY_STANDALONE_WIN
+	#define UNITY_PLATFORM_SUPPORTS_LINEAR
+#endif
+
 using UnityEngine;
-using System.Collections;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserverd.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo
 {
-	[AddComponentMenu("AVPro Video/Apply To Material")]
+	[AddComponentMenu("AVPro Video/Apply To Material", 300)]
 	public class ApplyToMaterial : MonoBehaviour 
 	{
 		public Vector2 _offset = Vector2.zero;
@@ -21,7 +24,22 @@ namespace RenderHeads.Media.AVProVideo
 		private Vector2 _originalScale = Vector2.one;
 		private Vector2 _originalOffset = Vector2.zero;
 
-		void Update()
+		private static int _propStereo;
+		private static int _propAlphaPack;
+		private static int _propApplyGamma;
+
+		void Awake()
+		{
+			if (_propStereo == 0 || _propAlphaPack == 0)
+			{
+				_propStereo = Shader.PropertyToID("Stereo");
+				_propAlphaPack = Shader.PropertyToID("AlphaPack");
+				_propApplyGamma = Shader.PropertyToID("_ApplyGamma");
+			}
+		}
+
+		// We do a LateUpdate() to allow for any changes in the texture that may have happened in Update()
+		void LateUpdate()
 		{
 			bool applied = false;
 			if (_media != null && _media.TextureProducer != null)
@@ -81,10 +99,27 @@ namespace RenderHeads.Media.AVProVideo
 					}
 				}
 
-				// Apply changes for stereo videos
-				if (_material.shader.name == "Unlit/InsideSphere")
+				if (_media != null)
 				{
-					Helper.SetupStereoMaterial(_material, _media.m_StereoPacking, _media.m_DisplayDebugStereoColorTint);
+					// Apply changes for stereo videos
+					if (_material.HasProperty(_propStereo))
+					{
+						Helper.SetupStereoMaterial(_material, _media.m_StereoPacking, _media.m_DisplayDebugStereoColorTint);
+					}
+					// Apply changes for alpha videos
+					if (_material.HasProperty(_propAlphaPack))
+					{
+						Helper.SetupAlphaPackedMaterial(_material, _media.m_AlphaPacking);
+					}
+#if UNITY_PLATFORM_SUPPORTS_LINEAR
+					// Apply gamma
+					if (_material.HasProperty(_propApplyGamma) && _media.Info != null)
+					{
+						Helper.SetupGammaMaterial(_material, _media.Info.PlayerSupportsLinearColorSpace());
+					}
+#else
+					_propApplyGamma |= 0;
+#endif
 				}
 			}
 		}
@@ -104,7 +139,7 @@ namespace RenderHeads.Media.AVProVideo
 				_originalOffset = _material.GetTextureOffset(_texturePropertyName);
 			}
 
-			Update();
+			LateUpdate();
 		}
 		
 		void OnDisable()

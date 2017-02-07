@@ -9,7 +9,7 @@ using System.Collections;
 using System.Collections.Generic;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserverd.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo.Demos
@@ -80,7 +80,7 @@ namespace RenderHeads.Media.AVProVideo.Demos
 			MediaPlayer newMediaPlayer = newMediaPlayerGameObject.AddComponent<MediaPlayer>();
 			newMediaPlayer.m_VideoPath = m_videoPath;
 			newMediaPlayer.m_AutoStart = true;
-			newMediaPlayer.m_Loop = false;
+			newMediaPlayer.m_Loop = true;
 			newMediaPlayer.SetGuiPositionFromVideoIndex( m_NumVideosAdded - 1 );
 			newMediaPlayer.SetDebugGuiEnabled( m_NumVideosAdded < 5 );
 
@@ -100,7 +100,7 @@ namespace RenderHeads.Media.AVProVideo.Demos
 				// Add the DisplayUGUI;
 				DisplayUGUI newGuiObject = newGuiGameObject.AddComponent<DisplayUGUI>();
 				newGuiObject._mediaPlayer = newMediaPlayer;
-				newGuiObject._keepAspectRatio = false;
+				newGuiObject._scaleMode = ScaleMode.StretchToFill;
 				newGuiObject.rectTransform.localScale = Vector3.one; 
 				newGuiObject.rectTransform.pivot = new Vector2( 0.0f, 1.0f );
 				m_aAddedVideos.Add( newGuiObject );

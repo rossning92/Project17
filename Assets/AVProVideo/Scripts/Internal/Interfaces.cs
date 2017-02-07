@@ -1,8 +1,12 @@
+#if UNITY_EDITOR || UNITY_STANDALONE_OSX || UNITY_STANDALONE_WIN
+	#define UNITY_PLATFORM_SUPPORTS_LINEAR
+#endif
+
 using UnityEngine;
-using System.Collections;
+using System.Collections.Generic;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserverd.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo
@@ -19,6 +23,7 @@ namespace RenderHeads.Media.AVProVideo
 			FinishedPlaying,	// Called when a non-looping video has finished playing
 			Closing,			// Called when the media is closed
 			Error,				// Called when an error occurs
+			SubtitleChange,		// Called when the subtitles change
 
 			// TODO: 
 			//FinishedSeeking,	// Called when seeking has finished
@@ -34,16 +39,26 @@ namespace RenderHeads.Media.AVProVideo
 		void Render();
 	}
 
+	public interface IMediaSubtitles
+	{
+		bool LoadSubtitlesSRT(string data);
+		int GetSubtitleIndex();
+		string GetSubtitleText();
+	}
+
 	public interface IMediaControl
 	{
 		// TODO: CanPreRoll() PreRoll()
 		// TODO: audio panning
 
-		bool	OpenVideoFromFile( string path );
+		/// <summary>
+		/// Be careful using this method directly.  It is best to instead use the OpenVidoeFromFile() method in the MediaPlayer component as this will set up the events correctly and also perform other checks
+		/// </summary>
+		bool	OpenVideoFromFile(string path, long offset);
 
         void    CloseVideo();
 
-        void	SetLooping( bool bLooping );
+        void	SetLooping(bool bLooping);
 		bool	IsLooping();
 
 		bool	HasMetaData();
@@ -71,9 +86,21 @@ namespace RenderHeads.Media.AVProVideo
 		void	SetVolume(float volume);
 		float	GetVolume();
 
+		int		GetCurrentAudioTrack();
+		void	SetAudioTrack(int index);
+
+		int		GetCurrentVideoTrack();
+		void	SetVideoTrack(int index);
+
+		float	GetBufferingProgress();
+		int		GetBufferedTimeRangeCount();
+		bool	GetBufferedTimeRange(int index, ref float startTimeMs, ref float endTimeMs);
+
 		ErrorCode GetLastError();
 
 		void	SetTextureProperties(FilterMode filterMode = FilterMode.Bilinear, TextureWrapMode wrapMode = TextureWrapMode.Clamp, int anisoLevel = 1);
+
+		void	GrabAudio(float[] buffer, int floatCount, int channelCount);
 	}
 
 	public interface IMediaInfo
@@ -94,9 +121,14 @@ namespace RenderHeads.Media.AVProVideo
 		int		GetVideoHeight();
 
 		/// <summary>
-		/// Returns the current achieved playback rate in frames per second
+		/// Returns the frame rate of the media.
 		/// </summary>
-		float	GetVideoPlaybackRate();
+		float	GetVideoFrameRate();
+
+		/// <summary>
+		/// Returns the current achieved display rate in frames per second
+		/// </summary>
+		float	GetVideoDisplayRate();
 
 		/// <summary>
 		/// Returns true if the media has a visual track
@@ -108,7 +140,56 @@ namespace RenderHeads.Media.AVProVideo
 		/// </summary>
 		bool	HasAudio();
 
-		/*float GetVideoFrameRate();
+		/// <summary>
+		/// Returns the number of audio tracks contained in the media
+		/// </summary>
+		int GetAudioTrackCount();
+
+		/// <summary>
+		/// Returns the current audio track identification
+		/// </summary>
+		string GetCurrentAudioTrackId();
+
+		/// <summary>
+		/// Returns the current audio track bitrate
+		/// </summary>
+		int GetCurrentAudioTrackBitrate();
+
+		/// <summary>
+		/// Returns the number of video tracks contained in the media
+		/// </summary>
+		int GetVideoTrackCount();
+
+		/// <summary>
+		/// Returns the current video track identification
+		/// </summary>
+		string GetCurrentVideoTrackId();
+
+		/// <summary>
+		/// Returns the current video track bitrate
+		/// </summary>
+		int GetCurrentVideoTrackBitrate();
+
+		/// <summary>
+		/// Returns the a description of which playback path is used internally.
+		/// This can for example expose whether CPU or GPU decoding is being performed
+		/// For Windows the available player descriptions are:
+		///		"DirectShow" - legacy Microsoft API but still very useful especially with modern filters such as LAV
+		///		"MF-MediaEngine-Software" - uses the Windows 8.1 features of the Microsoft Media Foundation API, but software decoding
+		///		"MF-MediaEngine-Hardware" - uses the Windows 8.1 features of the Microsoft Media Foundation API, but GPU decoding
+		///	Android just has "MediaPlayer"
+		///	macOS / tvOS / iOS just has "AVfoundation"
+		/// </summary>
+		string GetPlayerDescription();
+
+		/// <summary>
+		/// Whether this MediaPlayer instance supports linear color space
+		/// If it doesn't then a correction may have to be made in the shader
+		/// </summary>
+		bool PlayerSupportsLinearColorSpace();
+
+
+		/*
 		string GetMediaDescription();
 		string GetVideoDescription();
 		string GetAudioDescription();*/
@@ -117,14 +198,23 @@ namespace RenderHeads.Media.AVProVideo
 	public interface IMediaProducer
 	{
 		/// <summary>
-		/// Returns the Unity texture containing the current frame image
+		/// Returns the Unity texture containing the current frame image.
+		/// The texture pointer will return null while the video is loading
+		/// This texture usually remains the same for the duration of the video.
+		/// There are cases when this texture can change, for instance: if the graphics device is recreated,
+		/// a new video is loaded, or if an adaptive stream (eg HLS) is used and it switches video streams.
 		/// </summary>
-		Texture	GetTexture();
+		Texture GetTexture( int index = 0 );
 
 		/// <summary>
 		/// Returns a count of how many times the texture has been updated
 		/// </summary>
 		int		GetTextureFrameCount();
+
+		/// <summary>
+		/// Returns the presentation time stamp of the current texture
+		/// </summary>
+		long GetTextureTimeStamp();
 
 		/// <summary>
 		/// Returns true if the image on the texture is upside-down
@@ -146,11 +236,19 @@ namespace RenderHeads.Media.AVProVideo
 		Android,
 		WindowsPhone,
 		WindowsUWP,
-		Count = 7,
+		WebGL,
+		Count = 8,
 		Unknown = 100,
 	}
 
 	public enum StereoPacking
+	{
+		None,
+		TopBottom,				// Top is the left eye, bottom is the right eye
+		LeftRight,              // Left is the left eye, right is the right eye
+	}
+
+	public enum AlphaPacking
 	{
 		None,
 		TopBottom,
@@ -163,9 +261,34 @@ namespace RenderHeads.Media.AVProVideo
 		LoadFailed = 100,
 	}
 
+	public static class Windows
+	{
+		public enum VideoApi
+		{
+			MediaFoundation,
+			DirectShow,
+		};
+
+		// WIP: Experimental feature to allow overriding audio device for VR headsets
+		public const string AudioDeviceOutputName_Vive = "HTC VIVE USB Audio";
+		public const string AudioDeviceOutputName_Rift = "Rift Audio";
+	}
+
+	public class Subtitle
+	{
+		public int index;
+		public string text;
+		public int timeStartMs, timeEndMs;
+
+		public bool IsTime(float time)
+		{
+			return (time >= timeStartMs && time < timeEndMs);
+		}
+	}
+
 	public static class Helper
 	{
-		public const string ScriptVersion = "1.3.9";
+		public const string ScriptVersion = "1.5.20";
 
 		public static string GetName(Platform platform)
 		{
@@ -181,15 +304,31 @@ namespace RenderHeads.Media.AVProVideo
 
 		public static string[] GetPlatformNames()
 		{
-			return new string[] { 
-				GetName(Platform.Windows), 
+			return new string[] {
+				GetName(Platform.Windows),
 				GetName(Platform.MacOSX),
 				GetName(Platform.iOS),
 				GetName(Platform.tvOS),
 				GetName(Platform.Android),
 				GetName(Platform.WindowsPhone),
 				GetName(Platform.WindowsUWP),
+				GetName(Platform.WebGL),
 			};
+		}
+
+#if AVPROVIDEO_DISABLE_LOGGING
+		[System.Diagnostics.Conditional("ALWAYS_FALSE")]
+#endif
+		public static void LogInfo(string message, Object context = null)
+		{
+			if (context == null)
+			{
+				Debug.Log("[AVProVideo] " + message);
+			}
+			else
+			{
+				Debug.Log("[AVProVideo] " + message, context);
+			}
 		}
 
 		public static string GetTimeString(float totalSeconds)
@@ -202,11 +341,16 @@ namespace RenderHeads.Media.AVProVideo
 
 			int seconds = Mathf.RoundToInt(totalSeconds - usedSeconds);
 
-			string result = minutes.ToString("00") + ":" + seconds.ToString("00");
-			if (hours > 0)
+			string result;
+			if (hours <= 0)
 			{
-				result = hours.ToString() + ":" + result;
+				result = string.Format("{0:00}:{1:00}", minutes, seconds);
 			}
+			else
+			{
+				result = string.Format("{2}:{0:00}:{1:00}", minutes, seconds, hours);
+			}
+
 			return result;
 		}
 
@@ -229,12 +373,110 @@ namespace RenderHeads.Media.AVProVideo
 					break;
 			}
 
-			material.DisableKeyword("STEREO_DEBUG_OFF");
-			material.DisableKeyword("STEREO_DEBUG");
-
 			if (displayDebugTinting)
 			{
 				material.EnableKeyword("STEREO_DEBUG");
+			}
+			else
+			{
+				material.DisableKeyword("STEREO_DEBUG");
+			}
+		}
+
+		public static void SetupAlphaPackedMaterial(Material material, AlphaPacking packing)
+		{
+			material.DisableKeyword("ALPHAPACK_TOP_BOTTOM");
+			material.DisableKeyword("ALPHAPACK_LEFT_RIGHT");
+			material.DisableKeyword("ALPHAPACK_NONE");
+
+			// Enable the required mode
+			switch (packing)
+			{
+				case AlphaPacking.None:
+					break;
+				case AlphaPacking.TopBottom:
+					material.EnableKeyword("ALPHAPACK_TOP_BOTTOM");
+					break;
+				case AlphaPacking.LeftRight:
+					material.EnableKeyword("ALPHAPACK_LEFT_RIGHT");
+					break;
+			}
+		}
+
+		public static void SetupGammaMaterial(Material material, bool playerSupportsLinear)
+		{
+#if UNITY_PLATFORM_SUPPORTS_LINEAR
+			if (QualitySettings.activeColorSpace == ColorSpace.Linear && !playerSupportsLinear)
+			{
+				material.EnableKeyword("APPLY_GAMMA");
+			}
+			else
+			{
+				material.DisableKeyword("APPLY_GAMMA");
+			}
+#endif
+		}
+
+		public static float ConvertFrameToTimeSeconds(int frame, float frameRate)
+		{
+			float frameDurationSeconds = 1f / frameRate;
+			return ((float)frame * frameDurationSeconds) + (frameDurationSeconds * 0.5f);		// Add half a frame we that the time lands in the middle of the frame range and not at the edges
+		}
+
+		public static void DrawTexture(Rect screenRect, Texture texture, ScaleMode scaleMode, AlphaPacking alphaPacking, Material material)
+		{
+			if (Event.current.type == EventType.Repaint)
+			{
+				float textureWidth = texture.width;
+				float textureHeight = texture.height;
+				switch (alphaPacking)
+				{
+					case AlphaPacking.LeftRight:
+						textureWidth *= 0.5f;
+						break;
+					case AlphaPacking.TopBottom:
+						textureHeight *= 0.5f;
+						break;
+				}
+
+				float aspectRatio = (float)textureWidth / (float)textureHeight;
+				Rect sourceRect = new Rect(0f, 0f, 1f, 1f);
+				switch (scaleMode)
+				{
+					case ScaleMode.ScaleAndCrop:
+						{
+							float screenRatio = screenRect.width / screenRect.height;
+							if (screenRatio > aspectRatio)
+							{
+								float adjust = aspectRatio / screenRatio;
+								sourceRect = new Rect(0f, (1f - adjust) * 0.5f, 1f, adjust);
+							}
+							else
+							{
+								float adjust = screenRatio / aspectRatio;
+								sourceRect = new Rect(0.5f - adjust * 0.5f, 0f, adjust, 1f);
+							}
+						}
+						break;
+					case ScaleMode.ScaleToFit:
+						{
+							float screenRatio = screenRect.width / screenRect.height;
+							if (screenRatio > aspectRatio)
+							{
+								float adjust = aspectRatio / screenRatio;
+								screenRect = new Rect(screenRect.xMin + screenRect.width * (1f - adjust) * 0.5f, screenRect.yMin, adjust * screenRect.width, screenRect.height);
+							}
+							else
+							{
+								float adjust = screenRatio / aspectRatio;
+								screenRect = new Rect(screenRect.xMin, screenRect.yMin + screenRect.height * (1f - adjust) * 0.5f, screenRect.width, adjust * screenRect.height);
+							}
+						}
+						break;
+					case ScaleMode.StretchToFill:
+						break;
+				}
+				Graphics.DrawTexture(screenRect, texture, sourceRect, 0, 0, 0, 0, GUI.color, material);
 			}
 		}
 
@@ -283,6 +525,102 @@ namespace RenderHeads.Media.AVProVideo
 			RenderTexture.active = prevRT;
 
 			return resultTexture;
-		}		
+		}
+
+		/// <summary>
+		/// Parse time in format: 00:00:48,924 and convert to milliseconds
+		/// </summary>
+		private static int ParseTimeToMs(string text)
+		{
+			int result = 0;
+
+			string[] digits = text.Split(new char[] { ':', ',' });
+
+			if (digits.Length == 4)
+			{
+				int hours = int.Parse(digits[0]);
+				int minutes = int.Parse(digits[1]);
+				int seconds = int.Parse(digits[2]);
+				int milliseconds = int.Parse(digits[3]);
+
+				result = milliseconds + (seconds + (minutes + (hours * 60)) * 60) * 1000;
+			}
+
+			return result;
+		}
+
+		public static List<Subtitle> LoadSubtitlesSRT(string data)
+		{
+			List<Subtitle> result = null;
+
+			if (!string.IsNullOrEmpty(data))
+			{
+				data = data.Trim();
+				string[] lines = data.Split(new string[] { "\n\r", "\r\n", "\n", "\r" }, System.StringSplitOptions.None);
+
+				if (lines.Length >= 3)
+				{
+					result = new List<Subtitle>(256);
+
+					int index = 0;
+					Subtitle subtitle = null;
+					for (int i = 0; i < lines.Length; i++)
+					{
+						if (index == 0)
+						{
+							subtitle = new Subtitle();
+							subtitle.index = int.Parse(lines[i]);
+						}
+						else if (index == 1)
+						{
+							string[] times = lines[i].Split(new string[] { " --> " }, System.StringSplitOptions.RemoveEmptyEntries);
+							if (times.Length == 2)
+							{
+								subtitle.timeStartMs = ParseTimeToMs(times[0]);
+								subtitle.timeEndMs = ParseTimeToMs(times[1]);
+							}
+						}
+						else
+						{
+							if (!string.IsNullOrEmpty(lines[i]))
+							{
+								if (index == 2)
+								{
+									subtitle.text = lines[i];
+								}
+								else
+								{
+									subtitle.text += "\n" + lines[i];
+								}
+							}
+						}
+
+						if (string.IsNullOrEmpty(lines[i]) && index > 1)
+						{
+							result.Add(subtitle);
+							index = 0;
+							subtitle = null;
+						}
+						else
+						{
+							index++;
+						}
+					}
+
+					// Handle the last one
+					if (subtitle != null)
+					{
+						result.Add(subtitle);
+						subtitle = null;
+					}
+				}
+				else
+				{
+					Debug.LogWarning("[AVProVideo] SRT format doesn't appear to be valid");
+				}
+			}
+
+			return result;
+		}
 	}
 }

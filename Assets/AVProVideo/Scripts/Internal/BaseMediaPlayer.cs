@@ -1,20 +1,24 @@
-﻿using UnityEngine;
-using System.Collections;
+﻿#if UNITY_EDITOR || UNITY_STANDALONE_OSX || UNITY_STANDALONE_WIN
+	#define UNITY_PLATFORM_SUPPORTS_LINEAR
+#endif
+
+using UnityEngine;
+using System.Collections.Generic;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserved.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserved.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo
 {
-	public abstract class BaseMediaPlayer : IMediaPlayer, IMediaControl, IMediaInfo, IMediaProducer, System.IDisposable
+	public abstract class BaseMediaPlayer : IMediaPlayer, IMediaControl, IMediaInfo, IMediaProducer, IMediaSubtitles, System.IDisposable
 	{
 		public abstract string		GetVersion();
-		
-		public abstract bool		OpenVideoFromFile( string path );
+
+		public abstract bool		OpenVideoFromFile(string path, long offset);
         public abstract void		CloseVideo();
 
-        public abstract void		SetLooping( bool bLooping );
+        public abstract void		SetLooping(bool bLooping);
 		public abstract bool		IsLooping();
 
 		public abstract bool		HasMetaData();
@@ -34,7 +38,7 @@ namespace RenderHeads.Media.AVProVideo
 		public abstract float		GetDurationMs();
 		public abstract int			GetVideoWidth();
 		public abstract int			GetVideoHeight();
-		public abstract float		GetVideoPlaybackRate();
+		public abstract float		GetVideoDisplayRate();
 		public abstract bool		HasAudio();
 		public abstract bool		HasVideo();
 
@@ -44,14 +48,31 @@ namespace RenderHeads.Media.AVProVideo
 		public abstract bool		IsFinished();
 		public abstract bool		IsBuffering();
 
-		public abstract Texture		GetTexture();
+		public abstract Texture		GetTexture( int index = 0 );
 		public abstract int			GetTextureFrameCount();
+		public virtual long			GetTextureTimeStamp() { return long.MinValue; }
 		public abstract bool		RequiresVerticalFlip();
 
 		public abstract void		MuteAudio(bool bMuted);
 		public abstract bool		IsMuted();
 		public abstract void		SetVolume(float volume);
 		public abstract float		GetVolume();
+
+		public abstract int			GetAudioTrackCount();
+		public abstract int			GetCurrentAudioTrack();
+		public abstract void		SetAudioTrack(int index);
+		public abstract string		GetCurrentAudioTrackId();
+		public abstract int			GetCurrentAudioTrackBitrate();
+
+		public abstract int			GetVideoTrackCount();
+		public abstract int			GetCurrentVideoTrack();
+		public abstract void		SetVideoTrack(int index);
+		public abstract string		GetCurrentVideoTrackId();
+		public abstract int			GetCurrentVideoTrackBitrate();
+
+		public abstract float		GetVideoFrameRate();
+
+		public abstract float		GetBufferingProgress();
 
 		public abstract void		Update();
 		public abstract void		Render();
@@ -62,11 +83,28 @@ namespace RenderHeads.Media.AVProVideo
 			return _lastError;
 		}
 
-		protected ErrorCode _lastError = ErrorCode.None;
+		public string GetPlayerDescription()
+		{
+			return _playerDescription;
+		}
 
-		private FilterMode _defaultTextureFilterMode = FilterMode.Bilinear;
-		private TextureWrapMode _defaultTextureWrapMode = TextureWrapMode.Clamp;
-		private int _defaultTextureAnisoLevel = 1;
+		public virtual bool PlayerSupportsLinearColorSpace()
+		{
+#if UNITY_PLATFORM_SUPPORTS_LINEAR
+			return true;
+#else
+			return false;
+#endif
+		}
+
+		public virtual int		GetBufferedTimeRangeCount() { return 0; }
+		public virtual bool		GetBufferedTimeRange(int index, ref float startTimeMs, ref float endTimeMs) { return false; }
+
+		protected string _playerDescription = string.Empty;
+		protected ErrorCode _lastError = ErrorCode.None;
+		protected FilterMode _defaultTextureFilterMode = FilterMode.Bilinear;
+		protected TextureWrapMode _defaultTextureWrapMode = TextureWrapMode.Clamp;
+		protected int _defaultTextureAnisoLevel = 1;
 
 		public void SetTextureProperties(FilterMode filterMode = FilterMode.Bilinear, TextureWrapMode wrapMode = TextureWrapMode.Clamp, int anisoLevel = 0)
 		{
@@ -76,7 +114,7 @@ namespace RenderHeads.Media.AVProVideo
 			ApplyTextureProperties(GetTexture());
 		}
 
-		protected void ApplyTextureProperties(Texture texture)
+		protected virtual void ApplyTextureProperties(Texture texture)
 		{
 			if (texture != null)
 			{
@@ -84,6 +122,83 @@ namespace RenderHeads.Media.AVProVideo
 				texture.wrapMode = _defaultTextureWrapMode;
 				texture.anisoLevel = _defaultTextureAnisoLevel;
 			}
+		}
+
+		public virtual void GrabAudio(float[] buffer, int floatCount, int channelCount)
+		{
+
+		}
+
+		protected List<Subtitle> _subtitles;
+		protected Subtitle _currentSubtitle;
+
+		public bool LoadSubtitlesSRT(string data)
+		{
+			if (string.IsNullOrEmpty(data))
+			{
+				// Disable subtitles
+				_subtitles = null;
+				_currentSubtitle = null;
+			}
+			else
+			{
+				_subtitles = Helper.LoadSubtitlesSRT(data);
+			}
+			return (_subtitles != null);
+		}
+
+		public virtual void UpdateSubtitles()
+		{
+			if (_subtitles != null)
+			{
+				float time = GetCurrentTimeMs();
+
+				// TODO: implement a more effecient subtitle index searcher
+				int searchIndex = 0;
+				if (_currentSubtitle != null)
+				{
+					if (!_currentSubtitle.IsTime(time))
+					{
+						if (time > _currentSubtitle.timeEndMs)
+						{
+							searchIndex = _currentSubtitle.index + 1;
+						}
+						_currentSubtitle = null;
+					}
+				}
+
+				if (_currentSubtitle == null)
+				{
+					for (int i = searchIndex; i < _subtitles.Count; i++)
+					{
+						if (_subtitles[i].IsTime(time))
+						{
+							_currentSubtitle = _subtitles[i];
+							break;
+						}
+					}
+				}
+			}
+		}
+
+		public virtual int GetSubtitleIndex()
+		{
+			int result = -1;
+			if (_currentSubtitle != null)
+			{
+				result = _currentSubtitle.index;
+			}
+			return result;
+		}
+
+		public virtual string GetSubtitleText()
+		{
+			string result = string.Empty;
+			if (_currentSubtitle != null)
+			{
+				result = _currentSubtitle.text;
+			}
+			return result;
 		}
 	}
 }

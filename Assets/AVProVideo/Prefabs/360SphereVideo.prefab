@@ -127,7 +127,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _camera: {fileID: 0}
-  _material: {fileID: 2100000, guid: 17b8b08ed638ac04a9e726c6ec0cea35, type: 2}
+  _renderer: {fileID: 2327526}
 --- !u!114 &11476996
 MonoBehaviour:
   m_ObjectHideFlags: 1
@@ -139,6 +139,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f6d1977a52888584496b1acc7e998011, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  _offset: {x: 0, y: 0}
+  _scale: {x: 1, y: 1}
   _mesh: {fileID: 2327526}
   _media: {fileID: 11498420}
   _defaultTexture: {fileID: 0}
@@ -164,7 +166,11 @@ MonoBehaviour:
   m_DebugGui: 0
   m_Persistent: 0
   m_StereoPacking: 0
+  m_AlphaPacking: 0
   m_DisplayDebugStereoColorTint: 0
+  m_FilterMode: 1
+  m_WrapMode: 1
+  m_AnisoLevel: 0
   m_events:
     m_PersistentCalls:
       m_Calls: []
@@ -189,6 +195,18 @@ MonoBehaviour:
     pathLocation: 2
     path: 
   _optionsAndroid:
+    overridePath: 0
+    pathLocation: 2
+    path: 
+  _optionsWindowsPhone:
+    overridePath: 0
+    pathLocation: 2
+    path: 
+  _optionsWindowsUWP:
+    overridePath: 0
+    pathLocation: 2
+    path: 
+  _optionsWebGL:
     overridePath: 0
     pathLocation: 2
     path: 

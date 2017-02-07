@@ -5,11 +5,10 @@
 using UnityEngine;
 using UnityEditor;
 #if UNITY_FEATURE_UGUI
-using UnityEngine.UI;
 using UnityEditor.UI;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserverd.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo.Editor
@@ -25,8 +24,9 @@ namespace RenderHeads.Media.AVProVideo.Editor
 	    SerializedProperty m_UVRect;
 		SerializedProperty m_DefaultTexture;
 		SerializedProperty m_NoDefaultDisplay;
+		SerializedProperty m_DisplayInEditor;
 		SerializedProperty m_SetNativeSize;
-		SerializedProperty m_KeepAspectRatio;
+		SerializedProperty m_ScaleMode;
 	    GUIContent m_UVRectContent;
 
 
@@ -68,9 +68,10 @@ namespace RenderHeads.Media.AVProVideo.Editor
 	        m_Movie = serializedObject.FindProperty("_mediaPlayer");
 	        m_UVRect = serializedObject.FindProperty("m_UVRect");
 			m_SetNativeSize = serializedObject.FindProperty("_setNativeSize");
-			m_KeepAspectRatio = serializedObject.FindProperty("_keepAspectRatio");
+			m_ScaleMode = serializedObject.FindProperty("_scaleMode");
 
 			m_NoDefaultDisplay = serializedObject.FindProperty("_noDefaultDisplay");
+			m_DisplayInEditor = serializedObject.FindProperty("_displayInEditor");
 			m_DefaultTexture = serializedObject.FindProperty("_defaultTexture");
 
 			SetShowNativeSize(true);
@@ -83,11 +84,12 @@ namespace RenderHeads.Media.AVProVideo.Editor
 	        EditorGUILayout.PropertyField(m_Movie);
 			EditorGUILayout.PropertyField(m_DefaultTexture);
 			EditorGUILayout.PropertyField(m_NoDefaultDisplay);
+			EditorGUILayout.PropertyField(m_DisplayInEditor);
 			AppearanceControlsGUI();
 	        EditorGUILayout.PropertyField(m_UVRect, m_UVRectContent);
 
 			EditorGUILayout.PropertyField(m_SetNativeSize);
-			EditorGUILayout.PropertyField(m_KeepAspectRatio);
+			EditorGUILayout.PropertyField(m_ScaleMode);
 
 	        SetShowNativeSize(false);
 	        NativeSizeButtonGUI();

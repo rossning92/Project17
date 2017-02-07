@@ -1,46 +1,95 @@
 ﻿//#define AVPROVIDEO_BETA_SUPPORT_TIMESCALE		// BETA FEATURE: comment this in if you want to support frame stepping based on changes in Time.timeScale or Time.captureFramerate
+//#define AVPROVIDEO_FORCE_NULL_MEDIAPLAYER		// DEV FEATURE: comment this out to make all mediaplayers use the null mediaplayer
+//#define AVPROVIDEO_DEBUG_DISPLAY_EVENTS		// DEV FEATURE: show event logs in the gui display
+//#define AVPROVIDEO_DEBUG_FRAMESYNC			// INTERNAL TESTING
+//#define AVPROVIDEO_DISABLE_DEBUG_GUI			// INTERNAL TESTING
+//#define AVPROVIDEO_DISABLE_LOGGING			// DEV FEATURE: disables Debug.Log from AVPro Video
 #if UNITY_ANDROID && !UNITY_EDITOR
 	#define REAL_ANDROID
 #endif
 
 using UnityEngine;
 using System.Collections;
-using System.IO;
+using System.Collections.Generic;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserverd.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo
 {
-	[AddComponentMenu("AVPro Video/Media Player")]
+	[AddComponentMenu("AVPro Video/Media Player", -100)]
 	public class MediaPlayer : MonoBehaviour
 	{
 		// These fields are just used to setup the default properties for a new video that is about to be loaded
 		// Once a video has been loaded you should use the interfaces exposed in the properties to
 		// change playback properties (eg volume, looping, mute)
 		public FileLocation m_VideoLocation = FileLocation.RelativeToStreamingAssetsFolder;
+
 		public string m_VideoPath;
 
 		public bool m_AutoOpen = true;
-		public bool m_AutoStart = false;
+		public bool m_AutoStart = true;
 		public bool m_Loop = false;
+
 		[Range(0.0f, 1.0f)]
 		public float m_Volume = 1.0f;
+
 		public bool m_Muted = false;
+
+		[SerializeField]
 		[Range(-4.0f, 4.0f)]
 		public float m_PlaybackRate = 1.0f;
-		
+
+		[System.Serializable]
+		public class Setup
+		{
+			public bool displayDebugGUI;
+			public bool persistent;
+		}
+
 		// Component Properties
-		public bool m_DebugGui = false;
-		public bool m_Persistent = false;
+		[SerializeField]
+		private bool m_DebugGui = false;
+
+		[SerializeField]
+		private bool m_Persistent = false;
+
+		public bool DisplayDebugGUI
+		{
+			get { return m_DebugGui; }
+			set { m_DebugGui = value; }
+		}
+
+		public bool Persistent
+		{
+			get { return m_Persistent; }
+			set { m_Persistent = value; }
+		}
 
 		public StereoPacking m_StereoPacking = StereoPacking.None;
+
+		public AlphaPacking m_AlphaPacking = AlphaPacking.None;
+
 		public bool m_DisplayDebugStereoColorTint = false;
+
 		public FilterMode m_FilterMode = FilterMode.Bilinear;
+
 		public TextureWrapMode m_WrapMode = TextureWrapMode.Clamp;
+
 		[Range(0, 16)]
 		public int m_AnisoLevel = 0;
+
+		[SerializeField]
+		private bool m_LoadSubtitles;
+
+		[SerializeField]
+		private FileLocation m_SubtitleLocation = FileLocation.RelativeToStreamingAssetsFolder;
+		private FileLocation _queueSubtitleLocation;
+
+		[SerializeField]
+		private string m_SubtitlePath;
+		private string _queueSubtitlePath;
 
 		[SerializeField]
 		private MediaPlayerEvent	m_events;
@@ -49,28 +98,36 @@ namespace RenderHeads.Media.AVProVideo
 		private IMediaProducer		m_Texture;
 		private IMediaInfo			m_Info;
 		private IMediaPlayer		m_Player;
+		private IMediaSubtitles		m_Subtitles;
 		private System.IDisposable	m_Dispose;
 
+		// State
 		private bool		m_VideoOpened				= false;
 		private bool		m_AutoStartTriggered		= false;
 		private bool		m_WasPlayingOnPause			= false;
-		private bool		m_isRenderCoroutineRunning	= false;
+		private Coroutine	_renderingCoroutine			= null;
 
 		// Debug GUI
+		private const int	s_GuiDepth			= -1000;
 		private const float s_GuiScale			= 1.5f;
 		private const int	s_GuiStartWidth		= 10;
 		private const int	s_GuiWidth			= 180;
+#if AVPROVIDEO_DISABLE_DEBUG_GUI && !UNITY_EDITOR
+#else
 		private int m_GuiPositionX = s_GuiStartWidth;
+#endif
 
 		// Global init
 		private static bool s_GlobalStartup		= false;
 
-		// Events
+		// Event state
 		private bool m_EventFired_ReadyToPlay		= false;
 		private bool m_EventFired_Started			= false;
 		private bool m_EventFired_FirstFrameReady	= false;
 		private bool m_EventFired_FinishedPlaying	= false;
 		private bool m_EventFired_MetaDataReady		= false;
+		private int _previousSubtitleIndex = -1;
+
 
 		public enum FileLocation
 		{
@@ -88,13 +145,25 @@ namespace RenderHeads.Media.AVProVideo
 			public bool overridePath = false;
 			public FileLocation pathLocation = FileLocation.RelativeToStreamingAssetsFolder;
 			public string path;
+
+			public virtual bool IsModified()
+			{
+				return overridePath;     // The other variables don't matter if overridePath is false
+			}
 		}
 
 		[System.Serializable]
 		public class OptionsWindows : PlatformOptions
 		{
-			public bool forceDirectShowApi = false;
+			public Windows.VideoApi videoApi = Windows.VideoApi.MediaFoundation;
+			public bool useHardwareDecoding = true;
+			public bool useUnityAudio = false;
 			public string forceAudioOutputDeviceName = string.Empty;
+
+			public override bool IsModified()
+			{
+				return (base.IsModified() || !useHardwareDecoding || useUnityAudio || videoApi != Windows.VideoApi.MediaFoundation);
+			}
 		}
 
 		[System.Serializable]
@@ -112,28 +181,63 @@ namespace RenderHeads.Media.AVProVideo
 		[System.Serializable]
 		public class OptionsAndroid : PlatformOptions
 		{
+			public bool useFastOesPath = false;
+
+			[SerializeField]
+			public int fileOffset = 0;
+
+			public override bool IsModified()
+			{
+				return (base.IsModified() || fileOffset != 0 || useFastOesPath);
+			}
 		}
 		[System.Serializable]
 		public class OptionsWindowsPhone : PlatformOptions
 		{
+			public bool useHardwareDecoding = true;
+
+			public override bool IsModified()
+			{
+				return (base.IsModified() || !useHardwareDecoding);
+			}
 		}
 		[System.Serializable]
 		public class OptionsWindowsUWP : PlatformOptions
 		{
+			public bool useHardwareDecoding = true;
+
+			public override bool IsModified()
+			{
+				return (base.IsModified() || !useHardwareDecoding);
+			}
+		}
+		[System.Serializable]
+		public class OptionsWebGL : PlatformOptions
+		{
 		}
 
-		public OptionsWindows _optionsWindows = new OptionsWindows();
-		public OptionsMacOSX _optionsMacOSX = new OptionsMacOSX();
-		public OptionsIOS _optionsIOS = new OptionsIOS();
-		public OptionsTVOS _optionsTVOS = new OptionsTVOS();
-		public OptionsAndroid _optionsAndroid = new OptionsAndroid();
-		public OptionsWindowsPhone _optionsWindowsPhone = new OptionsWindowsPhone();
-		public OptionsWindowsUWP _optionsWindowsUWP = new OptionsWindowsUWP();
+		// TODO: move these to a Setup object
+		[SerializeField]
+		private OptionsWindows _optionsWindows = new OptionsWindows();
+		[SerializeField]
+		private OptionsMacOSX _optionsMacOSX = new OptionsMacOSX();
+		[SerializeField]
+		private OptionsIOS _optionsIOS = new OptionsIOS();
+		[SerializeField]
+		private OptionsTVOS _optionsTVOS = new OptionsTVOS();
+		[SerializeField]
+		private OptionsAndroid _optionsAndroid = new OptionsAndroid();
+		[SerializeField]
+		private OptionsWindowsPhone _optionsWindowsPhone = new OptionsWindowsPhone();
+		[SerializeField]
+		private OptionsWindowsUWP _optionsWindowsUWP = new OptionsWindowsUWP();
+		[SerializeField]
+		private OptionsWebGL _optionsWebGL = new OptionsWebGL();
 
 		/// <summary>
 		/// Properties
 		/// </summary>
-		
+
 		public IMediaInfo Info
 		{
 			get { return m_Info; }
@@ -153,6 +257,11 @@ namespace RenderHeads.Media.AVProVideo
 			get { return m_Texture; }
 		}
 
+		public virtual IMediaSubtitles Subtitles
+		{
+			get { return m_Subtitles; }
+		}
+
 		public MediaPlayerEvent Events
 		{
 			get
@@ -164,6 +273,20 @@ namespace RenderHeads.Media.AVProVideo
 				return m_events; 
 			}
 		}
+
+		public bool VideoOpened
+		{
+			get { return m_VideoOpened; }
+		}
+
+		public OptionsWindows PlatformOptionsWindows { get { return _optionsWindows; } }
+		public OptionsMacOSX PlatformOptionsMacOSX { get { return _optionsMacOSX; } }
+		public OptionsIOS PlatformOptionsIOS { get { return _optionsIOS; } }
+		public OptionsTVOS PlatformOptionsTVOS { get { return _optionsTVOS; } }
+		public OptionsAndroid PlatformOptionsAndroid { get { return _optionsAndroid; } }
+		public OptionsWindowsPhone PlatformOptionsWindowsPhone { get { return _optionsWindowsPhone; } }
+		public OptionsWindowsUWP PlatformOptionsWindowsUWP { get { return _optionsWindowsUWP; } }
+		public OptionsWebGL PlatformOptionsWebGL { get { return _optionsWebGL; } }
 
 		/// <summary>
 		/// Methods
@@ -178,7 +301,7 @@ namespace RenderHeads.Media.AVProVideo
 			}
 		}
 
-		private void Initialise()
+		protected void Initialise()
 		{
 			BaseMediaPlayer mediaPlayer = CreatePlatformMediaPlayer();
 			if (mediaPlayer != null)
@@ -188,18 +311,31 @@ namespace RenderHeads.Media.AVProVideo
 				m_Texture = mediaPlayer;
 				m_Info = mediaPlayer;
 				m_Player = mediaPlayer;
+				m_Subtitles = mediaPlayer;
 				m_Dispose = mediaPlayer;
 
 				if (!s_GlobalStartup)
 				{
 #if UNITY_5
-					Debug.Log(string.Format("[AVProVideo] Initialising AVPro Video (script v{0} plugin v{1}) on {2}/{3} (MT {4})", Helper.ScriptVersion, mediaPlayer.GetVersion(), SystemInfo.graphicsDeviceName, SystemInfo.graphicsDeviceVersion, SystemInfo.graphicsMultiThreaded));
+					Helper.LogInfo(string.Format("Initialising AVPro Video (script v{0} plugin v{1}) on {2}/{3} (MT {4})", Helper.ScriptVersion, mediaPlayer.GetVersion(), SystemInfo.graphicsDeviceName, SystemInfo.graphicsDeviceVersion, SystemInfo.graphicsMultiThreaded));
 #else
-					Debug.Log(string.Format("[AVProVideo] Initialising AVPro Video (script v{0} plugin v{1}) on {2}/{3}", Helper.ScriptVersion, mediaPlayer.GetVersion(), SystemInfo.graphicsDeviceName, SystemInfo.graphicsDeviceVersion));
+					Helper.LogInfo(string.Format("Initialising AVPro Video (script v{0} plugin v{1}) on {2}/{3}", Helper.ScriptVersion, mediaPlayer.GetVersion(), SystemInfo.graphicsDeviceName, SystemInfo.graphicsDeviceVersion));
 #endif
+
 #if AVPROVIDEO_BETA_SUPPORT_TIMESCALE
 					Debug.LogWarning("[AVProVideo] TimeScale support used.  This could affect performance when changing Time.timeScale or Time.captureFramerate.  This feature is useful for supporting video capture system that adjust time scale during capturing.");
 #endif
+
+#if (UNITY_HAS_GOOGLEVR || UNITY_DAYDREAM) && (UNITY_ANDROID)
+					// NOte: WE've removed this minor optimisation until Daydream support is more offical..
+					// It seems to work with the official release, but in 5.6beta UNITY_HAS_GOOGLEVR is always defined
+					// even for GearVR, which causes a problem as it doesn't use the same stereo eye determination method
+
+					// TODO: add iOS support for this once Unity supports it
+					//Helper.LogInfo("Enabling Google Daydream support");
+					//Shader.EnableKeyword("GOOGLEVR");
+#endif
+
 					s_GlobalStartup = true;
 				}
 			}
@@ -217,6 +353,11 @@ namespace RenderHeads.Media.AVProVideo
 				if (m_AutoOpen)
 				{
 					OpenVideoFromFile();
+
+					if (m_LoadSubtitles && m_Subtitles != null && !string.IsNullOrEmpty(m_SubtitlePath))
+					{
+						EnableSubtitles(m_SubtitleLocation, m_SubtitlePath);
+					}
 				}
 
 				StartRenderCoroutine();
@@ -236,7 +377,125 @@ namespace RenderHeads.Media.AVProVideo
 
 			return OpenVideoFromFile();
 		}
-		
+
+		public bool SubtitlesEnabled
+		{
+			get { return m_LoadSubtitles; }
+		}
+
+		public string SubtitlePath
+		{
+			get { return m_SubtitlePath; }
+		}
+
+		public FileLocation SubtitleLocation
+		{
+			get { return m_SubtitleLocation; }
+		}
+
+		public bool EnableSubtitles(FileLocation fileLocation, string filePath)
+		{
+			bool result = false;
+			if (m_Subtitles != null)
+			{
+				if (!string.IsNullOrEmpty(filePath))
+				{
+					string fullPath = GetPlatformFilePath(GetPlatform(), ref filePath, ref fileLocation);
+
+					bool checkForFileExist = true;
+					if (fullPath.Contains("://"))
+					{
+						checkForFileExist = false;
+					}
+#if (UNITY_ANDROID || (UNITY_5_2 && UNITY_WSA))
+					checkForFileExist = false;
+#endif
+
+					if (checkForFileExist && !System.IO.File.Exists(fullPath))
+					{
+						Debug.LogError("[AVProVideo] Subtitle file not found: " + fullPath, this);
+					}
+					else
+					{
+						Helper.LogInfo("Opening subtitles " + fullPath, this);
+
+						_previousSubtitleIndex = -1;
+
+						try
+						{
+							string subtitleData = string.Empty;
+							if (fullPath.Contains("://"))
+							{
+								WWW www = new WWW(fullPath);
+
+								while (!www.isDone && string.IsNullOrEmpty(www.error))
+								{
+#if !UNITY_WSA
+									System.Threading.Thread.Sleep(5);
+#endif
+								}
+
+								if (string.IsNullOrEmpty(www.error))
+								{
+									subtitleData = www.text;
+								}
+								else
+								{
+									Debug.LogError("[AVProVideo] Error loading subtitles '" + www.error + "' from " + fullPath);
+								}
+							}
+							else
+							{
+								subtitleData = System.IO.File.ReadAllText(fullPath);
+							}
+
+							if (m_Subtitles.LoadSubtitlesSRT(subtitleData))
+							{
+								m_SubtitleLocation = fileLocation;
+								m_SubtitlePath = filePath;
+								m_LoadSubtitles = false;
+								result = true;
+							}
+							else
+							{
+								Debug.LogError("[AVProVideo] Failed to load subtitles" + fullPath, this);
+							}
+						}
+						catch (System.Exception e)
+						{
+							Debug.LogError("[AVProVideo] Failed to load subtitles " + fullPath, this);
+							Debug.LogException(e, this);
+						}
+					}
+				}
+				else
+				{
+					Debug.LogError("[AVProVideo] No subtitle file path specified", this);
+				}
+			}
+			else
+			{
+				_queueSubtitleLocation = fileLocation;
+				_queueSubtitlePath = filePath;
+			}
+
+			return result;
+		}
+
+		public void DisableSubtitles()
+		{
+			if (m_Subtitles != null)
+			{
+				_previousSubtitleIndex = -1;
+				m_LoadSubtitles = false;
+				m_Subtitles.LoadSubtitlesSRT(string.Empty);
+			}
+			else
+			{
+				_queueSubtitlePath = string.Empty;
+			}
+		}
+
 		private bool OpenVideoFromFile()
 		{
 			bool result = false;
@@ -251,8 +510,10 @@ namespace RenderHeads.Media.AVProVideo
 				m_EventFired_ReadyToPlay = false;
 				m_EventFired_Started = false;
 				m_EventFired_FirstFrameReady = false;
+				_previousSubtitleIndex = -1;
 
 				// Potentially override the file location
+				long fileOffset = GetPlatformFileOffset();
 				string fullPath = GetPlatformFilePath(GetPlatform(), ref m_VideoPath, ref m_VideoLocation);
 
 				if (!string.IsNullOrEmpty(m_VideoPath))
@@ -262,7 +523,7 @@ namespace RenderHeads.Media.AVProVideo
 					{
 						checkForFileExist = false;
 					}
-#if (UNITY_ANDROID)
+#if (UNITY_ANDROID || (UNITY_5_2 && UNITY_WSA))
 					checkForFileExist = false;
 #endif
 
@@ -272,9 +533,9 @@ namespace RenderHeads.Media.AVProVideo
 					}
 					else
 					{
-						Debug.Log("[AVProVideo] Opening " + fullPath);
+						Helper.LogInfo("Opening " + fullPath + " (offset " + fileOffset + ")", this);
 
-						if (!m_Control.OpenVideoFromFile(fullPath))
+						if (!m_Control.OpenVideoFromFile(fullPath, fileOffset))
 						{
 							Debug.LogError("[AVProVideo] Failed to open " + fullPath, this);
 						}
@@ -282,6 +543,7 @@ namespace RenderHeads.Media.AVProVideo
 						{
 							SetPlaybackOptions();
 							result = true;
+							StartRenderCoroutine();
 						}
 					}
 				}
@@ -306,32 +568,37 @@ namespace RenderHeads.Media.AVProVideo
 			}
 		}
 
-        public void CloseVideo()
-        {
-            // Open the video file
-            if( m_Control != null )
-            {
+		public void CloseVideo()
+		{
+			// Close the video file
+			if( m_Control != null )
+			{
 				if (m_events != null)
 				{
 					m_events.Invoke(this, MediaPlayerEvent.EventType.Closing, ErrorCode.None);
 				}
 
-                m_AutoStartTriggered = false;
-                m_VideoOpened = false;
+				m_AutoStartTriggered = false;
+				m_VideoOpened = false;
 				m_EventFired_ReadyToPlay = false;
 				m_EventFired_Started = false;
 				m_EventFired_MetaDataReady = false;
 				m_EventFired_FirstFrameReady = false;
+				_previousSubtitleIndex = -1;
 
-                m_Control.CloseVideo();
-            }
-        }
+				m_Control.CloseVideo();
+			}
+			StopRenderCoroutine();
+		}
 
 		public void Play()
 		{
 			if (m_Control != null && m_Control.CanPlay())
 			{
 				m_Control.Play();
+
+				// Mark this event as done because it's irrelevant once playback starts
+				m_EventFired_ReadyToPlay = true;
 			}
 			else
 			{
@@ -382,12 +649,24 @@ namespace RenderHeads.Media.AVProVideo
 				if (m_VideoOpened && m_AutoStart && !m_AutoStartTriggered && m_Control.CanPlay())
 				{
 					m_AutoStartTriggered = true;
-					m_Control.Play();
+					Play();
+				}
+
+				if (_renderingCoroutine == null && m_Control.CanPlay())
+				{
+					StartRenderCoroutine();
+				}
+
+				if (m_Subtitles != null && !string.IsNullOrEmpty(_queueSubtitlePath))
+				{
+					EnableSubtitles(_queueSubtitleLocation, _queueSubtitlePath);
+					_queueSubtitlePath = string.Empty;
 				}
 
 #if AVPROVIDEO_BETA_SUPPORT_TIMESCALE
 				UpdateTimeScale();
 #endif
+
 				// Update
 				m_Player.Update();
 
@@ -427,9 +706,7 @@ namespace RenderHeads.Media.AVProVideo
 
 		void OnDestroy()
 		{
-			StopRenderCoroutine();
-
-			m_VideoOpened = false;
+			CloseVideo();
 
 			if (m_Dispose != null)
 			{
@@ -448,7 +725,7 @@ namespace RenderHeads.Media.AVProVideo
 		{
 			if (s_GlobalStartup)
 			{
-				Debug.Log("[AVProVideo] Shutdown");
+				Helper.LogInfo("Shutdown");
 
 				// Clean up any open media players
 				MediaPlayer[] players = Resources.FindObjectsOfTypeAll<MediaPlayer>();
@@ -473,30 +750,36 @@ namespace RenderHeads.Media.AVProVideo
 			}
 		}
 
-		#region Rendering Coroutine
+#region Rendering Coroutine
+
 		private void StartRenderCoroutine()
 		{
-			if (!m_isRenderCoroutineRunning)
+			if (_renderingCoroutine == null)
 			{
-				m_isRenderCoroutineRunning = true;
-				StartCoroutine("FinalRenderCapture");
+				// Use the method instead of the method name string to prevent garbage
+				_renderingCoroutine = StartCoroutine(FinalRenderCapture());
 			}
 		}
 
 		private void StopRenderCoroutine()
 		{
-			if (m_isRenderCoroutineRunning)
+			if (_renderingCoroutine != null)
 			{
-				StopCoroutine("FinalRenderCapture");
-				m_isRenderCoroutineRunning = false;
+				StopCoroutine(_renderingCoroutine);
+				_renderingCoroutine = null;
 			}
 		}
 
+		
+
 		private IEnumerator FinalRenderCapture()
 		{
+			// Preallocate the YieldInstruction to prevent garbage
+			YieldInstruction wait = new WaitForEndOfFrame();
 			while (Application.isPlaying)
 			{
-				yield return new WaitForEndOfFrame();
+				// NOTE: in editor, if the game view isn't visible then WaitForEndOfFrame will never complete
+				yield return wait;
 
 				if (this.enabled)
 				{
@@ -507,9 +790,9 @@ namespace RenderHeads.Media.AVProVideo
 				}
 			}
 		}
-		#endregion
+#endregion
 
-		#region Platform and Path
+#region Platform and Path
 		public static Platform GetPlatform()
 		{
 			Platform result = Platform.Unknown;
@@ -521,7 +804,7 @@ namespace RenderHeads.Media.AVProVideo
 #elif UNITY_EDITOR_WIN
 			result = Platform.Windows;
 #endif
-#else		
+#else
 			// Setup for running builds
 #if (UNITY_STANDALONE_WIN)
 			result = Platform.Windows;
@@ -533,18 +816,19 @@ namespace RenderHeads.Media.AVProVideo
 			result = Platform.tvOS;
 #elif (UNITY_ANDROID)
 			result = Platform.Android;
-#elif (UNITY_WP8)
-			// TODO: add Windows Phone 8 suppport
-#elif (UNITY_WP81)
-			// TODO: add Windows Phone 8.1 suppport
+#elif (UNITY_WP8 || UNITY_WP81 || UNITY_WINRT_8_1)
+			result = Platform.WindowsPhone;
+#elif (UNITY_WSA_10_0)
+			result = Platform.WindowsUWP;
+#elif (UNITY_WEBGL)
+			result = Platform.WebGL;
 #endif
 			
 #endif
-
 			return result;
 		}
 
-		public PlatformOptions GetPlatformOptions(Platform platform)
+		public PlatformOptions GetCurrentPlatformOptions()
 		{
 			PlatformOptions result = null;
 
@@ -571,6 +855,8 @@ namespace RenderHeads.Media.AVProVideo
 			result = _optionsWindowsPhone;
 #elif (UNITY_WSA_10_0)
 			result = _optionsWindowsUWP;
+#elif (UNITY_WEBGL)
+			result = _optionsWebGL;
 #endif
 			
 #endif
@@ -578,6 +864,41 @@ namespace RenderHeads.Media.AVProVideo
 		}
 
 #if UNITY_EDITOR
+		public PlatformOptions GetPlatformOptions(Platform platform)
+		{
+			PlatformOptions result = null;
+
+			switch (platform)
+			{
+				case Platform.Windows:
+					result = _optionsWindows;
+					break;
+				case Platform.MacOSX:
+					result = _optionsMacOSX;
+					break;
+				case Platform.Android:
+					result = _optionsAndroid;
+					break;
+				case Platform.iOS:
+					result = _optionsIOS;
+					break;
+				case Platform.tvOS:
+					result = _optionsTVOS;
+					break;
+				case Platform.WindowsPhone:
+					result = _optionsWindowsPhone;
+					break;
+				case Platform.WindowsUWP:
+					result = _optionsWindowsUWP;
+					break;
+				case Platform.WebGL:
+					result = _optionsWebGL;
+					break;
+			}
+
+			return result;
+		}
+
 		public static string GetPlatformOptionsVariable(Platform platform)
 		{
 			string result = string.Empty;
@@ -605,6 +926,9 @@ namespace RenderHeads.Media.AVProVideo
 				case Platform.WindowsUWP:
 					result = "_optionsWindowsUWP";
 					break;
+				case Platform.WebGL:
+					result = "_optionsWebGL";
+					break;
 			}
 
 			return result;
@@ -626,7 +950,11 @@ namespace RenderHeads.Media.AVProVideo
 					break;
 				case FileLocation.RelativeToProjectFolder:
 #if !UNITY_WINRT_8_1
-					result = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, ".."));
+                    string path = "..";
+#if UNITY_STANDALONE_OSX && !UNITY_EDITOR_OSX
+                        path += "/..";
+#endif
+					result = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, path));
 					result = result.Replace('\\', '/');
 #endif
 					break;
@@ -658,6 +986,15 @@ namespace RenderHeads.Media.AVProVideo
 			return result;
 		}
 
+		private long GetPlatformFileOffset()
+		{
+			long result = 0;
+//#if UNITY_ANDROID
+			result = _optionsAndroid.fileOffset;
+//#endif
+			return result;
+		}
+
 		private string GetPlatformFilePath(Platform platform, ref string filePath, ref FileLocation fileLocation)
 		{
 			string result = string.Empty;
@@ -665,7 +1002,7 @@ namespace RenderHeads.Media.AVProVideo
 			// Replace file path and location if overriden by platform options
 			if (platform != Platform.Unknown)
 			{
-				PlatformOptions options = GetPlatformOptions(platform);
+				PlatformOptions options = GetCurrentPlatformOptions();
 				if (options != null)
 				{
 					if (options.overridePath)
@@ -680,11 +1017,13 @@ namespace RenderHeads.Media.AVProVideo
 
 			return result;
 		}
-		#endregion
+#endregion
 
 		public virtual BaseMediaPlayer CreatePlatformMediaPlayer()
 		{
 			BaseMediaPlayer mediaPlayer = null;
+
+#if !AVPROVIDEO_FORCE_NULL_MEDIAPLAYER
 
 			// Setup for running in the editor (Either OSX, Windows or Linux)
 #if UNITY_EDITOR
@@ -692,24 +1031,29 @@ namespace RenderHeads.Media.AVProVideo
 #if UNITY_EDITOR_64
 			mediaPlayer = new OSXMediaPlayer();
 #else
-			Debug.LogError("[AVProVideo] 32-bit OS X Unity editor not supported.  64-bit required.");
+			Debug.LogWarning("[AVProVideo] 32-bit OS X Unity editor not supported.  64-bit required.");
 #endif
 #elif UNITY_EDITOR_WIN
 			WindowsMediaPlayer.InitialisePlatform();
-			mediaPlayer = new WindowsMediaPlayer(_optionsWindows.forceDirectShowApi, _optionsWindows.forceAudioOutputDeviceName);
+			mediaPlayer = new WindowsMediaPlayer(_optionsWindows.videoApi, _optionsWindows.useHardwareDecoding, _optionsWindows.forceAudioOutputDeviceName, _optionsWindows.useUnityAudio);
 #endif
 #else
 			// Setup for running builds
 #if (UNITY_STANDALONE_WIN || UNITY_WSA_10_0 || UNITY_WINRT_8_1)
 			WindowsMediaPlayer.InitialisePlatform();
-			mediaPlayer = new WindowsMediaPlayer(_optionsWindows.forceDirectShowApi);
+			mediaPlayer = new WindowsMediaPlayer(_optionsWindows.videoApi, _optionsWindows.useHardwareDecoding, _optionsWindows.forceAudioOutputDeviceName, _optionsWindows.useUnityAudio);
 #elif (UNITY_STANDALONE_OSX || UNITY_IPHONE || UNITY_IOS || UNITY_TVOS)
 			mediaPlayer = new OSXMediaPlayer();
 #elif (UNITY_ANDROID)
 			// Initialise platform (also unpacks videos from StreamingAsset folder (inside a jar), to the persistent data path)
 			AndroidMediaPlayer.InitialisePlatform();
-			mediaPlayer = new AndroidMediaPlayer();
+			mediaPlayer = new AndroidMediaPlayer(_optionsAndroid.useFastOesPath);
+#elif (UNITY_WEBGL)
+            WebGLMediaPlayer.InitialisePlatform();
+            mediaPlayer = new WebGLMediaPlayer();
 #endif
+#endif
+
 #endif
 
 			// Fallback
@@ -722,7 +1066,7 @@ namespace RenderHeads.Media.AVProVideo
 			return mediaPlayer;
 		}
 
-		#region Support for Time Scale
+#region Support for Time Scale
 #if AVPROVIDEO_BETA_SUPPORT_TIMESCALE
 		// Adjust this value to get faster performance but may drop frames.  
 		// Wait longer to ensure there is enough time for frames to process
@@ -772,7 +1116,7 @@ namespace RenderHeads.Media.AVProVideo
 			}
 		}
 #endif
-		#endregion
+#endregion
 
 		private bool ForceWaitForNewFrame(int lastFrameCount, float timeoutMs)
 		{
@@ -825,53 +1169,76 @@ namespace RenderHeads.Media.AVProVideo
 		{
 			if (m_events != null && m_Control != null)
 			{
-				// Finished event
-				if (!m_EventFired_FinishedPlaying && !m_Control.IsLooping() && m_Control.CanPlay() && m_Control.IsFinished())
-				{
-					m_EventFired_FinishedPlaying = true;
-					m_events.Invoke(this, MediaPlayerEvent.EventType.FinishedPlaying, ErrorCode.None);
-				}
+				m_EventFired_FinishedPlaying = FireEventIfPossible(MediaPlayerEvent.EventType.FinishedPlaying, m_EventFired_FinishedPlaying);
 
-				// Keep track of whether the Playing state has changed
-				if (m_EventFired_Started && !m_Control.IsPlaying())
+				// Reset some event states that can reset during playback
 				{
-					// Playing has stopped
-					m_EventFired_Started = false;
-				}
-
-				if (m_EventFired_FinishedPlaying && m_Control.IsPlaying() && !m_Control.IsFinished())
-				{
-					m_EventFired_FinishedPlaying = false;
-				}
-
-				// Fire events
-				if (!m_EventFired_MetaDataReady && m_Control.HasMetaData())
-				{
-					m_EventFired_MetaDataReady = true;
-					m_events.Invoke(this, MediaPlayerEvent.EventType.MetaDataReady, ErrorCode.None);
-				}
-				if (!m_EventFired_ReadyToPlay && !m_Control.IsPlaying() && m_Control.CanPlay())
-				{
-					m_EventFired_ReadyToPlay = true;
-					m_events.Invoke(this, MediaPlayerEvent.EventType.ReadyToPlay, ErrorCode.None);
-				}
-				if (!m_EventFired_Started && m_Control.IsPlaying())
-				{
-					m_EventFired_Started = true;
-					m_events.Invoke(this, MediaPlayerEvent.EventType.Started, ErrorCode.None);
-				}
-				if (m_Texture != null)
-				{
-					if (!m_EventFired_FirstFrameReady && m_Control.CanPlay() && m_Texture.GetTextureFrameCount() > 0)
+					// Keep track of whether the Playing state has changed
+					if (m_EventFired_Started && m_Control != null && !m_Control.IsPlaying())
 					{
-						m_EventFired_FirstFrameReady = true;
-						m_events.Invoke(this, MediaPlayerEvent.EventType.FirstFrameReady, ErrorCode.None);
+						// Playing has stopped
+						m_EventFired_Started = false;
 					}
+
+					// NOTE: We check m_Control isn't null in case the scene is unloaded in response to the FinishedPlaying event
+					if (m_EventFired_FinishedPlaying && m_Control != null && m_Control.IsPlaying() && !m_Control.IsFinished())
+					{
+						m_EventFired_FinishedPlaying = false;
+					}
+				}
+
+				m_EventFired_MetaDataReady = FireEventIfPossible(MediaPlayerEvent.EventType.MetaDataReady, m_EventFired_MetaDataReady);
+				m_EventFired_ReadyToPlay = FireEventIfPossible(MediaPlayerEvent.EventType.ReadyToPlay, m_EventFired_ReadyToPlay);
+				m_EventFired_Started = FireEventIfPossible(MediaPlayerEvent.EventType.Started, m_EventFired_Started);
+				m_EventFired_FirstFrameReady = FireEventIfPossible(MediaPlayerEvent.EventType.FirstFrameReady, m_EventFired_FirstFrameReady);
+				if (FireEventIfPossible(MediaPlayerEvent.EventType.SubtitleChange, false))
+				{
+					_previousSubtitleIndex = m_Subtitles.GetSubtitleIndex();
 				}
 			}
 		}
 
-		#region Application Focus and Pausing
+		private bool FireEventIfPossible(MediaPlayerEvent.EventType eventType, bool hasFired)
+		{
+			if (CanFireEvent(eventType, hasFired))
+			{
+				hasFired = true;
+				m_events.Invoke(this, eventType, ErrorCode.None);
+			}
+			return hasFired;
+		}
+		
+		private bool CanFireEvent(MediaPlayerEvent.EventType et, bool hasFired)
+		{
+			bool result = false;
+			if (m_events != null && m_Control != null && !hasFired)
+			{
+				switch (et)
+				{
+					case MediaPlayerEvent.EventType.FinishedPlaying:
+						result = (!m_Control.IsLooping() && m_Control.CanPlay() && m_Control.IsFinished());
+						break;
+					case MediaPlayerEvent.EventType.MetaDataReady:
+						result = (m_Control.HasMetaData());
+						break;
+					case MediaPlayerEvent.EventType.FirstFrameReady:
+						result = (m_Texture != null && m_Control.CanPlay() && m_Texture.GetTextureFrameCount() > 0);
+						break;
+					case MediaPlayerEvent.EventType.ReadyToPlay:
+						result = (!m_Control.IsPlaying() && m_Control.CanPlay());
+						break;
+					case MediaPlayerEvent.EventType.Started:
+						result = (m_Control.IsPlaying());
+						break;
+					case MediaPlayerEvent.EventType.SubtitleChange:
+						result = (_previousSubtitleIndex != m_Subtitles.GetSubtitleIndex());
+						break;
+				}
+			}
+			return result;
+		}
+
+#region Application Focus and Pausing
 #if !UNITY_EDITOR
 		void OnApplicationFocus( bool focusStatus )
 		{
@@ -885,7 +1252,7 @@ namespace RenderHeads.Media.AVProVideo
 					m_WasPlayingOnPause = false;
 					m_Control.Play();
 
-					Debug.Log("OnApplicationFocus: playing video again");
+					Helper.LogInfo("OnApplicationFocus: playing video again");
 				}
 			}
 #endif
@@ -903,7 +1270,7 @@ namespace RenderHeads.Media.AVProVideo
 					m_WasPlayingOnPause = true;
 					m_Control.Pause();
 
-					Debug.Log("OnApplicationPause: pausing video");
+					Helper.LogInfo("OnApplicationPause: pausing video");
 				}
 			}
 			else
@@ -914,9 +1281,9 @@ namespace RenderHeads.Media.AVProVideo
 #endif
 		}
 #endif
-		#endregion
+#endregion
 
-		#region Save Frame To PNG
+#region Save Frame To PNG
 #if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX || UNITY_EDITOR
 		[ContextMenu("Save Frame To PNG")]
 		public void SaveFrameToPng()
@@ -939,9 +1306,9 @@ namespace RenderHeads.Media.AVProVideo
 			}
 		}
 #endif
-		#endregion
+#endregion
 
-		#region Extract Frame
+#region Extract Frame
 		// "target" can be null or you can pass in an existing texture.
 		public Texture2D ExtractFrame(Texture2D target, float timeSeconds = -1f, bool accurateSeek = true, int timeoutMs = 1000)
 		{
@@ -969,7 +1336,7 @@ namespace RenderHeads.Media.AVProVideo
 
 					float seekTimeMs = timeSeconds * 1000f;
 
-					// If the frame is already avaiable just grab it
+					// If the frame is already available just grab it
 					if (TextureProducer.GetTexture() != null && m_Control.GetCurrentTimeMs() == seekTimeMs)
 					{
 						result = TextureProducer.GetTexture();
@@ -1001,11 +1368,11 @@ namespace RenderHeads.Media.AVProVideo
 			}
 			return result;
 		}
-		#endregion
+#endregion
 
-		#region Play/Pause Support for Unity Editor
+#region Play/Pause Support for Unity Editor
 		// This code handles the pause/play buttons in the editor
-		#if UNITY_EDITOR
+#if UNITY_EDITOR
 		static MediaPlayer()
 		{
 			UnityEditor.EditorApplication.playmodeStateChanged -= OnUnityPlayModeChanged;
@@ -1061,13 +1428,16 @@ namespace RenderHeads.Media.AVProVideo
 				StartRenderCoroutine();
 			}
 		}
-		#endif
-		#endregion
+#endif
+#endregion
 
-		#region IMGUI Debug Information Display
+#region IMGUI Debug Information Display
 		public void SetGuiPositionFromVideoIndex(int index)
 		{
+#if AVPROVIDEO_DISABLE_DEBUG_GUI && !UNITY_EDITOR
+#else
 			m_GuiPositionX = Mathf.FloorToInt((s_GuiStartWidth * s_GuiScale) + (s_GuiWidth * index * s_GuiScale));
+#endif
 		}
 
 		public void SetDebugGuiEnabled(bool bEnabled)
@@ -1075,38 +1445,138 @@ namespace RenderHeads.Media.AVProVideo
 			m_DebugGui = bEnabled;
 		}
 
+#if AVPROVIDEO_DEBUG_FRAMESYNC
+		private int _lastFrameCount = 0;
+		private int _sameFrameCount = 1;
+
+		public int SameFrameCount
+		{
+			get { return _sameFrameCount; }
+		}
+
+		private void UpdateFrameSyncDebugging()
+		{
+			int frameCount = TextureProducer.GetTextureFrameCount();
+			if (frameCount == _lastFrameCount)
+			{
+				_sameFrameCount++;
+			}
+			else
+			{
+				_sameFrameCount = 1;
+			}
+			_lastFrameCount = frameCount;
+		}
+#endif
+
+#if AVPROVIDEO_DEBUG_DISPLAY_EVENTS
+		private Queue<string> _eventLog = new Queue<string>(8);
+		private float _eventTimer = 1f;
+
+		private void AddEvent(MediaPlayerEvent.EventType et)
+		{
+			Helper.LogInfo("[MediaPlayer] Event: " + et.ToString(), this);
+			_eventLog.Enqueue(et.ToString());
+			if (_eventLog.Count > 5)
+			{
+				_eventLog.Dequeue();
+				_eventTimer = 1f;
+			}
+		}
+
+		private void UpdateEventLogs()
+		{
+			if (_eventLog != null && _eventLog.Count > 0)
+			{
+				_eventTimer -= Time.deltaTime;
+				if (_eventTimer < 0f)
+				{
+					_eventLog.Dequeue();
+					_eventTimer = 1f;
+				}
+			}
+		}
+
+		// Callback function to handle events
+		private void OnMediaPlayerEvent(MediaPlayer mp, MediaPlayerEvent.EventType et, ErrorCode errorCode)
+		{
+			AddEvent(et);
+		}
+#endif
+
+#if AVPROVIDEO_DISABLE_DEBUG_GUI && !UNITY_EDITOR
+#else
 		void OnGUI()
 		{
 			if (m_Info != null && m_DebugGui)
 			{
-				GUI.depth = -1;
+				GUI.depth = s_GuiDepth;
 				GUI.matrix = Matrix4x4.TRS(new Vector3(m_GuiPositionX, 10f, 0f), Quaternion.identity, new Vector3(s_GuiScale, s_GuiScale, 1.0f));
 
 				GUILayout.BeginVertical("box", GUILayout.MaxWidth(s_GuiWidth));
 				GUILayout.Label(System.IO.Path.GetFileName(m_VideoPath));
-				GUILayout.Label("Dimensions: " + m_Info.GetVideoWidth() + " x " + m_Info.GetVideoHeight());
+				GUILayout.Label("Dimensions: " + m_Info.GetVideoWidth() + "x" + m_Info.GetVideoHeight() + "@" + m_Info.GetVideoFrameRate().ToString("F2"));
 				GUILayout.Label("Time: " + (m_Control.GetCurrentTimeMs() * 0.001f).ToString("F1") + "s / " + (m_Info.GetDurationMs() * 0.001f).ToString("F1") + "s");
-				GUILayout.Label("Rate: " + m_Info.GetVideoPlaybackRate().ToString("F2") + "Hz");
+				GUILayout.Label("Rate: " + m_Info.GetVideoDisplayRate().ToString("F2") + "Hz");
 
 				if (TextureProducer != null && TextureProducer.GetTexture() != null)
 				{
-					// Show texture without and with alpha blending
-					GUILayout.BeginHorizontal();
-					Rect r1 = GUILayoutUtility.GetRect(32f, 32f);
-					GUILayout.Space(8f);
-					Rect r2 = GUILayoutUtility.GetRect(32f, 32f);
-					if (TextureProducer.RequiresVerticalFlip())
+#if UNITY_ANDROID
+					// In OES mode we can't display the texture without using a special shader, so just don't display it
+					if (!_optionsAndroid.useFastOesPath)
+#endif
 					{
-						GUIUtility.ScaleAroundPivot(new Vector2(1f, -1f), new Vector2(0, r1.y + (r1.height / 2)));
+						// Show texture without and with alpha blending
+						GUILayout.BeginHorizontal();
+						Rect r1 = GUILayoutUtility.GetRect(32f, 32f);
+						GUILayout.Space(8f);
+						Rect r2 = GUILayoutUtility.GetRect(32f, 32f);
+						Matrix4x4 prevMatrix = GUI.matrix;
+						if (TextureProducer.RequiresVerticalFlip())
+						{
+							GUIUtility.ScaleAroundPivot(new Vector2(1f, -1f), new Vector2(0, r1.y + (r1.height / 2)));
+						}
+						GUI.DrawTexture(r1, TextureProducer.GetTexture(), ScaleMode.ScaleToFit, false);
+						GUI.DrawTexture(r2, TextureProducer.GetTexture(), ScaleMode.ScaleToFit, true);
+						GUI.matrix = prevMatrix;
+						GUILayout.FlexibleSpace();
+						GUILayout.EndHorizontal();
 					}
-					GUI.DrawTexture(r1, TextureProducer.GetTexture(), ScaleMode.ScaleToFit, false);
-					GUI.DrawTexture(r2, TextureProducer.GetTexture(), ScaleMode.ScaleToFit, true);
-					GUILayout.FlexibleSpace();
-					GUILayout.EndHorizontal();
 				}
+
+#if AVPROVIDEO_DEBUG_DISPLAY_EVENTS
+				// Dirty code to hack in an event monitor
+				if (Event.current.type == EventType.Repaint)
+				{
+					this.Events.RemoveListener(OnMediaPlayerEvent);
+					this.Events.AddListener(OnMediaPlayerEvent);
+					UpdateEventLogs();
+				}
+
+				if (_eventLog != null && _eventLog.Count > 0)
+				{
+					GUILayout.Label("Recent Events: ");
+					GUILayout.BeginVertical("box");
+					int eventIndex = 0;
+					foreach (string eventString in _eventLog)
+					{
+						GUI.color = Color.white;
+						if (eventIndex == 0)
+						{
+							GUI.color = new Color(1f, 1f, 1f, _eventTimer);
+						}
+						GUILayout.Label(eventString);
+						eventIndex++;
+					}
+					GUILayout.EndVertical();
+					GUI.color = Color.white;
+				}
+#endif
 				GUILayout.EndVertical();
 			}
 		}
-		#endregion
+#endif
+
+#endregion
 	}
 }

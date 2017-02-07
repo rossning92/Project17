@@ -1,6 +1,9 @@
 ﻿using UnityEngine;
-using System.Collections;
 using System.Collections.Generic;
+
+//-----------------------------------------------------------------------------
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
+//-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo.Demos
 {

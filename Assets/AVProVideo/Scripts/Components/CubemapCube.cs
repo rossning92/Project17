@@ -1,8 +1,11 @@
+#if UNITY_EDITOR || UNITY_STANDALONE_OSX || UNITY_STANDALONE_WIN
+	#define UNITY_PLATFORM_SUPPORTS_LINEAR
+#endif
+
 using UnityEngine;
-using System.Collections;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserverd.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo
@@ -13,26 +16,41 @@ namespace RenderHeads.Media.AVProVideo
 	[RequireComponent(typeof(MeshRenderer))]
 	[RequireComponent(typeof(MeshFilter))]
 	//[ExecuteInEditMode]
-	[AddComponentMenu("AVPro Video/Cubemap Cube (VR)")]
+	[AddComponentMenu("AVPro Video/Cubemap Cube (VR)", 400)]
 	public class CubemapCube : MonoBehaviour
 	{
 		private Mesh _mesh;
-		private MeshRenderer _renderer;
+        private MeshRenderer _renderer;
 
-		[SerializeField]
-		private Material _material;
+        [SerializeField]
+        private Material _material = null;
 
-		[SerializeField]
-		private MediaPlayer _mediaPlayer;
+        [SerializeField]
+        private MediaPlayer _mediaPlayer = null;
 
 		// This value comes from the facebook transform ffmpeg filter and is used to prevent seams appearing along the edges due to bilinear filtering
 		[SerializeField]
 		private float expansion_coeff = 1.01f;
-		
+
+		private Texture _texture;
+		private bool _verticalFlip;
+		private int _textureWidth;
+		private int _textureHeight;
+		private static int _propApplyGamma;
+
 		public MediaPlayer Player
 		{
 			set { _mediaPlayer = value; }
 			get { return _mediaPlayer; }
+		}
+
+
+		void Awake()
+		{
+			if (_propApplyGamma == 0)
+			{
+				_propApplyGamma = Shader.PropertyToID("_ApplyGamma");
+			}
 		}
 
 		void Start()
@@ -79,32 +97,51 @@ namespace RenderHeads.Media.AVProVideo
 				_renderer = null;
 			}
 		}
-		
-		void Update()
+
+		// We do a LateUpdate() to allow for any changes in the texture that may have happened in Update()
+		void LateUpdate()
 		{
 			if (Application.isPlaying)
 			{
 				Texture texture = null;
+				bool requiresVerticalFlip = false;
 				if (_mediaPlayer != null && _mediaPlayer.Control != null)
 				{
 					if (_mediaPlayer.TextureProducer != null)
 					{
 						texture = _mediaPlayer.TextureProducer.GetTexture();
-					}
-				}
+						requiresVerticalFlip = _mediaPlayer.TextureProducer.RequiresVerticalFlip();
 
-				UpdateMaterial(texture);
-				if (texture != null)
+						// Detect changes that we need to apply to the material/mesh
+						if (_texture != texture || 
+							_verticalFlip != requiresVerticalFlip ||
+							(texture != null && (_textureWidth != texture.width || _textureHeight != texture.width))
+							)
+						{
+							_texture = texture;
+							if (texture != null)
+							{
+								UpdateMeshUV(texture.width, texture.height, requiresVerticalFlip);
+							}
+						}
+
+#if UNITY_PLATFORM_SUPPORTS_LINEAR
+						// Apply gamma
+						if (_renderer.material.HasProperty(_propApplyGamma) && _mediaPlayer.Info != null)
+						{
+							Helper.SetupGammaMaterial(_renderer.material, _mediaPlayer.Info.PlayerSupportsLinearColorSpace());
+						}
+#endif
+					}
+
+					_renderer.material.mainTexture = _texture;
+				}
+				else
 				{
-					UpdateMeshUV(texture.width, texture.height, _mediaPlayer.TextureProducer.RequiresVerticalFlip());
+					_renderer.material.mainTexture = null;
 				}
 			}
-		}
-		
-		private void UpdateMaterial(Texture texture)
-		{
-			_renderer.material.mainTexture = texture;
-		}
+		}	
 
 		private void BuildMesh()
 		{
@@ -206,6 +243,10 @@ namespace RenderHeads.Media.AVProVideo
 
 		private void UpdateMeshUV(int textureWidth, int textureHeight, bool flipY)
 		{
+			_textureWidth = textureWidth;
+			_textureHeight = textureHeight;
+			_verticalFlip = flipY;
+
 			float texWidth = textureWidth;
 			float texHeight = textureHeight;
 
@@ -216,7 +257,7 @@ namespace RenderHeads.Media.AVProVideo
 			float hO = pixelOffset / texHeight;
 
 			const float third = 1f / 3f;
-			const float half = 1f / 2f;
+			const float half = 0.5f;
 
 			Vector2[] uv = new Vector2[]
 			{

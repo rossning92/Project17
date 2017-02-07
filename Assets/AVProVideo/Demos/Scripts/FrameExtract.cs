@@ -6,6 +6,10 @@
 using UnityEngine;
 using System.Collections;
 
+//-----------------------------------------------------------------------------
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
+//-----------------------------------------------------------------------------
+
 namespace RenderHeads.Media.AVProVideo.Demos
 {
 	public class FrameExtract : MonoBehaviour
@@ -32,7 +36,11 @@ namespace RenderHeads.Media.AVProVideo.Demos
 			// Create a texture to draw the thumbnails on
 			_displaySheet = RenderTexture.GetTemporary(Screen.width, Screen.height, 0);
 			_displaySheet.useMipMap = false;
+			#if UNITY_5_5_OR_NEWER
 			_displaySheet.autoGenerateMips = false;
+			#else
+			_displaySheet.generateMips = false;
+			#endif
 			_displaySheet.antiAliasing = 1;
 			_displaySheet.Create();
 
@@ -70,8 +78,9 @@ namespace RenderHeads.Media.AVProVideo.Demos
 			_texture = new Texture2D(info.GetVideoWidth(), info.GetVideoHeight(), TextureFormat.ARGB32, false);
 
 			_timeStepSeconds = (_mediaPlayer.Info.GetDurationMs() / 1000f) / (float)NumFrames;
+
 #if AVPRO_FILESYSTEM_SUPPORT
-			_filenamePrefix = _mediaPlayer.m_VideoPath;
+			_filenamePrefix = System.IO.Path.GetFileName(_mediaPlayer.m_VideoPath);
 #endif
 		}
 
@@ -110,6 +119,7 @@ namespace RenderHeads.Media.AVProVideo.Demos
 			if (_saveToJPG)
 			{
 				string filePath = _filenamePrefix + "-" + _frameIndex + ".jpg";
+				Debug.Log("Writing frame to file: " + filePath);
 				System.IO.File.WriteAllBytes(filePath, _texture.EncodeToJPG());
 			}
 #endif

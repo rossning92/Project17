@@ -5,26 +5,19 @@
 	#endif
 #endif
 
-//#define USE_MULTI_TEXTURE
 using UnityEngine;
-using System.Collections;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 //-----------------------------------------------------------------------------
-// Copyright 2015-2016 RenderHeads Ltd.  All rights reserverd.
+// Copyright 2015-2017 RenderHeads Ltd.  All rights reserverd.
 //-----------------------------------------------------------------------------
 
 namespace RenderHeads.Media.AVProVideo
 {
-	public class WindowsMediaPlayer : BaseMediaPlayer
+	public sealed partial class WindowsMediaPlayer : BaseMediaPlayer
 	{
-#if USE_MULTI_TEXTURE
-		private const int NUM_TEXTURE_FRAMES = 12;
-		private const int NUM_FRAMES_BUFFER = 6;
-#endif
-		// WIP: Experimental feature to allow overriding audio device for VR headsets
-		public const string AudioDeviceOutputName_Vive = "HTC VIVE USB Audio";
-		public const string AudioDeviceOutputName_Rift = "Rift Audio";
+		private bool		_useUnityAudio = false;
 		private string		_audioDeviceOutputName = string.Empty;
 
 		private bool		_isPlaying = false;
@@ -36,17 +29,24 @@ namespace RenderHeads.Media.AVProVideo
 		private bool		_hasMetaData = false;
 		private int			_width = 0;
 		private int			_height = 0;
+		private float		_frameRate = 0f;
 		private bool		_hasAudio = false;
 		private bool		_hasVideo = false;
 		private bool		_isTextureTopDown = true;
 		private System.IntPtr _nativeTexture = System.IntPtr.Zero;
-		private Texture2D _texture;
-		private Texture2D[]	_textures;
+		private Texture2D	_texture;
 		private System.IntPtr _instance = System.IntPtr.Zero;
-		private float		_playbackRateTimer;
+		private float		_displayRateTimer;
 		private int			_lastFrameCount;
-		private float		_playbackRate = 1f;
-		private bool		_forceDirectShowApi = false;
+		private float		_displayRate = 1f;
+		private Windows.VideoApi	_videoApi = Windows.VideoApi.MediaFoundation;
+		private bool		_useHardwareDecoding = true;
+		private int			_queueSetAudioTrackIndex = -1;
+		private bool		_supportsLinearColorSpace = true;
+
+		private int			_bufferedTimeRangeCount = 0;
+		private float[]		_bufferedTimeRanges = new float[0];
+
 		private static bool _isInitialised = false;
 		private static string _version = "Plug-in not yet initialised";
 
@@ -79,10 +79,17 @@ namespace RenderHeads.Media.AVProVideo
 			Native.Deinit();
 		}
 
-		public WindowsMediaPlayer(bool forceDirectShowApi, string audioDeviceOutputName = null)
+		public WindowsMediaPlayer(Windows.VideoApi videoApi, bool useHardwareDecoding, string audioDeviceOutputName, bool useUnityAudio)
 		{
-			_forceDirectShowApi = forceDirectShowApi;
+			SetOptions(videoApi, useHardwareDecoding, audioDeviceOutputName, useUnityAudio);
+		}
+
+		public void SetOptions(Windows.VideoApi videoApi, bool useHardwareDecoding, string audioDeviceOutputName, bool useUnityAudio)
+		{
+			_videoApi = videoApi;
+			_useHardwareDecoding = useHardwareDecoding;
 			_audioDeviceOutputName = audioDeviceOutputName;
+			_useUnityAudio = useUnityAudio;
 		}
 
 		public override string GetVersion()
@@ -90,11 +97,11 @@ namespace RenderHeads.Media.AVProVideo
 			return _version;
 		}
 
-		public override bool OpenVideoFromFile(string path)
+		public override bool OpenVideoFromFile(string path, long offset)
 		{
 			CloseVideo();
 
-			_instance = Native.OpenSource(_instance, path, _forceDirectShowApi, _audioDeviceOutputName);
+			_instance = Native.OpenSource(_instance, path, (int)_videoApi, _useHardwareDecoding, _audioDeviceOutputName, _useUnityAudio);
 
 			if (_instance == System.IntPtr.Zero)
 			{
@@ -102,15 +109,17 @@ namespace RenderHeads.Media.AVProVideo
 				return false;
 			}
 
+			Native.SetUnityAudioEnabled(_instance, _useUnityAudio);
+
 			return true;
 		}
 
 		private void DisplayLoadFailureSuggestion(string path)
 		{
-			bool usingDirectShow = _forceDirectShowApi || SystemInfo.operatingSystem.Contains("Windows 7") || SystemInfo.operatingSystem.Contains("Windows Vista") || SystemInfo.operatingSystem.Contains("Windows XP");
+			bool usingDirectShow = (_videoApi == Windows.VideoApi.DirectShow) || SystemInfo.operatingSystem.Contains("Windows 7") || SystemInfo.operatingSystem.Contains("Windows Vista") || SystemInfo.operatingSystem.Contains("Windows XP");
 			if (usingDirectShow && path.Contains(".mp4"))
 			{
-				Debug.LogWarning("[AVProVideo] The native Windows DirectShow H.264 decoder doesn't support videos with resolution above 1920x1080. You may need to reduce your video resolution, or install 3rd party DirectShow codec (eg LAV Filters).  This shouldn't be a problem for Windows 8 and above as it has a native limitation of 3840x2160.");
+				Debug.LogWarning("[AVProVideo] The native Windows DirectShow H.264 decoder doesn't support videos with resolution above 1920x1080. You may need to reduce your video resolution, switch to another codec (such as DivX or Hap), or install 3rd party DirectShow codec (eg LAV Filters).  This shouldn't be a problem for Windows 8 and above as it has a native limitation of 3840x2160.");
 			}
 		}
 
@@ -118,6 +127,7 @@ namespace RenderHeads.Media.AVProVideo
         {
 			_width = 0;
 			_height = 0;
+			_frameRate = 0f;
 			_hasAudio = _hasVideo = false;
 			_hasMetaData = false;
 			_canPlay = false;
@@ -126,9 +136,11 @@ namespace RenderHeads.Media.AVProVideo
 			_bLoop = false;
 			_audioMuted = false;
 			_lastFrameCount = 0;
-			_playbackRate = 0f;
+			_displayRate = 0f;
+			_displayRateTimer = 0f;
+			_queueSetAudioTrackIndex = -1;
+			_supportsLinearColorSpace = true;
 			_lastError = ErrorCode.None;
-			_playbackRateTimer = 0f;
 			_nativeTexture = System.IntPtr.Zero;
 
 			if (_texture != null)
@@ -136,20 +148,11 @@ namespace RenderHeads.Media.AVProVideo
 				Texture2D.Destroy(_texture);
 				_texture = null;
 			}
-			if (_textures != null)
-			{
-				for (int i = 0; i < _textures.Length; i++)
-				{
-					Texture2D.Destroy(_textures[i]);
-					_textures[i] = null;
-				}
-				_textures = null;
-			}
 			if (_instance != System.IntPtr.Zero)
 			{
-				Native.CloseSource(_instance);
+                Native.CloseSource(_instance);
 				_instance = System.IntPtr.Zero;
-			}
+            }
 
 			// Issue thread event to free the texture on the GPU
 			IssueRenderThreadEvent(Native.RenderThreadEvent.FreeTextures);
@@ -226,7 +229,7 @@ namespace RenderHeads.Media.AVProVideo
 
 		public override bool IsBuffering()
 		{
-			return false;
+			return Native.IsBuffering(_instance);
 		}
 
 		public override float GetDurationMs()
@@ -244,30 +247,17 @@ namespace RenderHeads.Media.AVProVideo
 			return _height;
 		}
 
-		public override float GetVideoPlaybackRate()
+		public override float GetVideoFrameRate()
 		{
-			return _playbackRate;
+			return _frameRate;
 		}
 
-#if USE_MULTI_TEXTURE
-		public override Texture GetTexture()
+		public override float GetVideoDisplayRate()
 		{
-			Texture result = null;
-			int frameCount = Native.GetTextureFrameCount(_instance);
-			// Wait for 3 frames to be read then start the display
-			if (frameCount > NUM_FRAMES_BUFFER && _textures != null)
-			{
-				int lastWrittenBuffer = (frameCount - 1) % NUM_TEXTURE_FRAMES;
-				int readBuffer = lastWrittenBuffer - NUM_FRAMES_BUFFER;
-				if (readBuffer < 0) readBuffer += NUM_TEXTURE_FRAMES;
-
-				//Debug.Log("returned buffer " + readBuffer + " " + frameCount + " " + Time.frameCount);
-				result = _textures[readBuffer];
-			}
-			return result;
+			return _displayRate;
 		}
-#else
-		public override Texture GetTexture()
+
+		public override Texture GetTexture( int index )
 		{
 			Texture result = null;
 			if (Native.GetTextureFrameCount(_instance) > 0)
@@ -276,10 +266,15 @@ namespace RenderHeads.Media.AVProVideo
 			}
 			return result;
 		}
-#endif
+
 		public override int GetTextureFrameCount()
 		{
 			return Native.GetTextureFrameCount(_instance);
+		}
+
+		public override long GetTextureTimeStamp()
+		{
+			return Native.GetTextureTimeStamp(_instance);
 		}
 
 		public override bool RequiresVerticalFlip()
@@ -317,6 +312,29 @@ namespace RenderHeads.Media.AVProVideo
 			return Native.GetPlaybackRate(_instance);
 		}
 
+		public override float GetBufferingProgress()
+		{
+			return Native.GetBufferingProgress(_instance);
+		}
+
+		public override int GetBufferedTimeRangeCount()
+		{
+			return _bufferedTimeRangeCount;
+		}
+
+		public override bool GetBufferedTimeRange(int index, ref float startTimeMs, ref float endTimeMs)
+		{
+			bool result = false;
+			if (index >= 0 && index < _bufferedTimeRangeCount)
+			{
+				//Debug.Assert(_bufferedTimeRanges.Length > (index * 2 + 1));
+				result = true;
+				startTimeMs = 1000f * _bufferedTimeRanges[index * 2 + 0];
+				endTimeMs = 1000f * _bufferedTimeRanges[index * 2 + 1];
+			}
+			return result;
+		}
+
 		public override void MuteAudio(bool bMuted)
 		{
 			_audioMuted = bMuted;
@@ -339,10 +357,89 @@ namespace RenderHeads.Media.AVProVideo
 			return _volume;
 		}
 
+		public override int GetAudioTrackCount()
+		{
+			return Native.GetAudioTrackCount(_instance);
+		}
+
+		public override int GetCurrentAudioTrack()
+		{
+			return Native.GetAudioTrack(_instance);
+		}
+
+		public override void SetAudioTrack( int index )
+		{
+			_queueSetAudioTrackIndex = index;
+		}
+
+		public override int GetVideoTrackCount()
+		{
+			int result = 0;
+			if (HasVideo())
+			{
+				result = 1;
+			}
+			return result;
+		}
+
+		public override string GetCurrentAudioTrackId()
+		{
+			// TODO
+			return string.Empty;
+		}
+
+		public override int GetCurrentAudioTrackBitrate()
+		{
+			// TODO
+			return 0;
+		}
+
+		public override int GetCurrentVideoTrack()
+		{
+			// TODO
+			return 0;
+		}
+
+		public override void SetVideoTrack( int index )
+		{
+			// TODO
+		}
+
+		public override string GetCurrentVideoTrackId()
+		{
+			// TODO
+			return string.Empty;
+		}
+
+		public override int GetCurrentVideoTrackBitrate()
+		{
+			// TODO
+			return 0;
+		}
+
 		public override void Update()
 		{
 			Native.Update(_instance);
 			_lastError = (ErrorCode)Native.GetLastErrorCode(_instance);
+
+			if (_queueSetAudioTrackIndex >= 0 && _hasAudio)
+			{
+				// We have to queue the setting of the audio track, as doing it from the UI can result in a crash (for some unknown reason)
+				Native.SetAudioTrack(_instance, _queueSetAudioTrackIndex);
+				_queueSetAudioTrackIndex = -1;
+			}
+
+			// Update network buffering
+			{
+				_bufferedTimeRangeCount = Native.GetBufferedRanges(_instance, _bufferedTimeRanges, _bufferedTimeRanges.Length / 2);
+				if (_bufferedTimeRangeCount > (_bufferedTimeRanges.Length / 2))
+				{
+					_bufferedTimeRanges = new float[_bufferedTimeRangeCount * 2];
+					_bufferedTimeRangeCount = Native.GetBufferedRanges(_instance, _bufferedTimeRanges, _bufferedTimeRanges.Length / 2);
+				}
+			}
+
+			UpdateSubtitles();
 
 			if (!_canPlay)
 			{
@@ -354,6 +451,7 @@ namespace RenderHeads.Media.AVProVideo
 						{
 							_width = Native.GetWidth(_instance);
 							_height = Native.GetHeight(_instance);
+							_frameRate = Native.GetFrameRate(_instance);
 
 							// Sometimes the dimensions aren't available yet, in which case fail and poll them again next loop
 							if (_width > 0 && _height > 0)
@@ -390,8 +488,13 @@ namespace RenderHeads.Media.AVProVideo
 							_hasMetaData = true;
 						}
 
-						string playerDescription = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(Native.GetPlayerDescription(_instance));
-						Debug.Log("[AVProVideo] Using player type " + playerDescription);
+						_playerDescription = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(Native.GetPlayerDescription(_instance));
+						_supportsLinearColorSpace = !_playerDescription.Contains("MF-MediaEngine-Hardware");
+						Helper.LogInfo("Using playback path: " + _playerDescription + " (" + _width + "x" + _height + "@" + GetVideoFrameRate().ToString("F2") + ")");
+						if (_hasVideo)
+						{
+							OnTextureSizeChanged();
+						}
 					}
 				}
 				if (_hasMetaData)
@@ -400,77 +503,114 @@ namespace RenderHeads.Media.AVProVideo
 				}
 			}
 
-			if (_hasVideo && _width > 0 && _height > 0)
+#if UNITY_WSA
+			// WSA has an issue where it can load the audio track first and the video track later
+			// Here we try to handle this case and get the video track information when it arrives
+			if (_hasAudio && !_hasVideo)
 			{
-#if USE_MULTI_TEXTURE
-				if (_textures == null)
-				{
-					System.IntPtr ptr = Native.GetTexturePointers(_instance, 0);
-					if (ptr != System.IntPtr.Zero)
-					{
-						_textures = new Texture2D[NUM_TEXTURE_FRAMES];
-						for (int i = 0; i < _textures.Length; i++)
-						{
-							ptr = Native.GetTexturePointers(_instance, i);
-							_textures[i] = Texture2D.CreateExternalTexture(_width, _height, TextureFormat.RGBA32, false, false, ptr);
-						}
+				_width = Native.GetWidth(_instance);
+				_height = Native.GetHeight(_instance);
+				_frameRate = Native.GetFrameRate(_instance);
 
-						Debug.Log("creating textures...");
-					}
-				}
-#else
-				if (_texture == null)
+				if (_width > 0 && _height > 0)
 				{
-					System.IntPtr ptr = Native.GetTexturePointer(_instance);
-					if (ptr != System.IntPtr.Zero)
-					{
-						_isTextureTopDown = Native.IsTextureTopDown(_instance);
-						_texture = Texture2D.CreateExternalTexture(_width, _height, TextureFormat.RGBA32, false, false, ptr);
-						if (_texture != null)
-						{
-							_nativeTexture = ptr;
-							ApplyTextureProperties(_texture);
-						}
-					}
+					_hasVideo = true;
+					OnTextureSizeChanged();
 				}
+			}
 #endif
 
-			}
-
-			// Check for texture recreation (due to device loss or change in texture size)
-			if (_nativeTexture != System.IntPtr.Zero && _texture != null)
+			if (_hasVideo)
 			{
-				System.IntPtr ptr = Native.GetTexturePointer(_instance);
-				if (ptr != _nativeTexture)
+				System.IntPtr newPtr = Native.GetTexturePointer(_instance);
+
+				// Check for texture recreation (due to device loss or change in texture size)
+				if (_texture != null && _nativeTexture != System.IntPtr.Zero && _nativeTexture != newPtr)
 				{
-					if (ptr != System.IntPtr.Zero)
+					_width = Native.GetWidth(_instance);
+					_height = Native.GetHeight(_instance);
+
+					if (newPtr == System.IntPtr.Zero || (_width != _texture.width || _height != _texture.height))
 					{
-						_isTextureTopDown = Native.IsTextureTopDown(_instance);
-						_texture.UpdateExternalTexture(ptr);
-					}
-					else
-					{
+						if (_width != _texture.width || _height != _texture.height)
+						{
+							Helper.LogInfo("Texture size changed: " + _width + " X " + _height);
+							OnTextureSizeChanged();
+						}
+
+						_nativeTexture = System.IntPtr.Zero;
 						Texture2D.Destroy(_texture);
 						_texture = null;
 					}
+					else if (_nativeTexture != newPtr)
+					{
+						_texture.UpdateExternalTexture(newPtr);
+						_nativeTexture = newPtr;
+					}
+				}
 
-					_nativeTexture = ptr;
+#if UNITY_5_4_OR_NEWER
+				// In Unity 5.4.2 and above the video texture turns black when changing the TextureQuality in the Quality Settings
+				// The code below gets around this issue.  A bug report has been sent to Unity.  So far we have tested and replicated the
+				// "bug" in Windows only, but a user has reported it in Android too
+				if (_texture != null && _nativeTexture != System.IntPtr.Zero && _texture.GetNativeTexturePtr() == System.IntPtr.Zero)
+				{
+					//Debug.Log("RECREATING");
+					_texture.UpdateExternalTexture(_nativeTexture);
+				}
+#endif
+
+				// Check if a new texture has to be created
+				if (_texture == null && _width > 0 && _height > 0 && newPtr != System.IntPtr.Zero)
+				{
+					_isTextureTopDown = Native.IsTextureTopDown(_instance);
+					_texture = Texture2D.CreateExternalTexture(_width, _height, TextureFormat.RGBA32, false, false, newPtr);
+					if (_texture != null)
+					{
+						_nativeTexture = newPtr;
+						ApplyTextureProperties(_texture);
+					}
+					else
+					{
+						Debug.LogError("[AVProVideo] Failed to create texture");
+					}
 				}
 			}
 		}
 
+		private void OnTextureSizeChanged()
+		{
+			// Warning for DirectShow Microsoft H.264 decoder which has a limit of 1920x1080 and can fail silently and return video dimensions clamped at 720x480
+			if ((_width == 720 || _height == 480) && _playerDescription.Contains("DirectShow"))
+			{
+				Debug.LogWarning("[AVProVideo] If video fails to play then it may be due to the resolution being higher than 1920x1080 which is the limitation of the Microsoft DirectShow H.264 decoder.\nTo resolve this you can either use Windows 8 or above (and disable 'Force DirectShow' option), resize your video, use a different codec (such as Hap or DivX), or install a 3rd party H.264 decoder such as LAV Filters.");
+			}
+			// Warning when using software decoder with high resolution videos
+			else if ((_width > 1920 || _height > 1080) && _playerDescription.Contains("MF-MediaEngine-Software"))
+			{
+				//Debug.LogWarning("[AVProVideo] Using software video decoder.  For best performance consider adding the -force-d3d11-no-singlethreaded command-line switch to enable GPU decoding.");
+			}
+			else if (QualitySettings.activeColorSpace == ColorSpace.Linear && _playerDescription.Contains("MF-MediaEngine-Hardware"))
+			{
+				//Debug.LogWarning("[AVProVideo] You're using the GPU decoder with linear color-space setting in Unity.  This can cause videos to become washed out due to our GPU decoder path not supporting sRGB textures.  This can be fixed easily by:\n1) Switching back to Gamma colour space in Player Settings\n2) Disabling hardware decoding\n3) Adding 'col.rgb = pow(col.rgb, 2.2);' to any shader rendering the video texture. If you're using the InsideSphere shader, make sure to tick 'Apply Gamma' on the material.");
+			}
+		}
+
+		private void UpdateDisplayFrameRate()
+		{
+			_displayRateTimer += Time.deltaTime;
+			if (_displayRateTimer >= 0.5f)
+			{
+				int frameCount = Native.GetTextureFrameCount(_instance);
+				_displayRate = (float)(frameCount - _lastFrameCount) / _displayRateTimer;
+				_displayRateTimer = 0f;
+				_lastFrameCount = frameCount;
+			}
+		}
 
 		public override void Render()
 		{
-			// Update playback rate 
-			_playbackRateTimer += Time.deltaTime;
-			if (_playbackRateTimer >= 1f)
-			{
-				int frameCount = Native.GetTextureFrameCount(_instance);
-				_playbackRate = (float)(frameCount - _lastFrameCount) / _playbackRateTimer;
-				_playbackRateTimer = 0f;
-				_lastFrameCount = frameCount;
-			}
+			UpdateDisplayFrameRate();
 
 			IssueRenderThreadEvent(Native.RenderThreadEvent.UpdateAllTextures);
 		}
@@ -480,8 +620,18 @@ namespace RenderHeads.Media.AVProVideo
 			CloseVideo();
 		}
 
+		public override void GrabAudio(float[] buffer, int floatCount, int channelCount)
+		{
+            Native.GrabAudio(_instance, buffer, floatCount, channelCount);
+        }
+
+		public override bool PlayerSupportsLinearColorSpace()
+		{
+			return _supportsLinearColorSpace;
+		}
+
 		//private static int _lastUpdateAllTexturesFrame = -1;
-		
+
 		private static void IssueRenderThreadEvent(Native.RenderThreadEvent renderEvent)
 		{
 			/*if (renderEvent == Native.RenderThreadEvent.UpdateAllTextures)
@@ -539,7 +689,7 @@ namespace RenderHeads.Media.AVProVideo
 			// Open and Close
 
 			[DllImport("AVProVideo")]
-			public static extern System.IntPtr OpenSource(System.IntPtr instance, [MarshalAs(UnmanagedType.LPWStr)]string path, bool forceDirectShow, [MarshalAs(UnmanagedType.LPWStr)]string forceAudioOutputDeviceName);
+			public static extern System.IntPtr OpenSource(System.IntPtr instance, [MarshalAs(UnmanagedType.LPWStr)]string path, int videoApiIndex, bool useHardwareDecoding, [MarshalAs(UnmanagedType.LPWStr)]string forceAudioOutputDeviceName, bool useUnityAudio);
 
 			[DllImport("AVProVideo")]
 			public static extern void CloseSource(System.IntPtr instance);
@@ -584,7 +734,13 @@ namespace RenderHeads.Media.AVProVideo
 			public static extern int GetHeight(System.IntPtr instance);
 
 			[DllImport("AVProVideo")]
+			public static extern float GetFrameRate(System.IntPtr instance);
+
+			[DllImport("AVProVideo")]
 			public static extern float GetDuration(System.IntPtr instance);
+
+			[DllImport("AVProVideo")]
+			public static extern int GetAudioTrackCount(System.IntPtr instance);
 
 			// State
 
@@ -601,6 +757,9 @@ namespace RenderHeads.Media.AVProVideo
 			public static extern bool IsFinished(System.IntPtr instance);
 
 			[DllImport("AVProVideo")]
+			public static extern bool IsBuffering(System.IntPtr instance);
+
+			[DllImport("AVProVideo")]
 			public static extern float GetCurrentTime(System.IntPtr instance);
 
 			[DllImport("AVProVideo")]
@@ -611,6 +770,19 @@ namespace RenderHeads.Media.AVProVideo
 
 			[DllImport("AVProVideo")]
 			public static extern void SetPlaybackRate(System.IntPtr instance, float rate);
+
+			[DllImport("AVProVideo")]
+			public static extern int GetAudioTrack(System.IntPtr instance);
+
+			[DllImport("AVProVideo")]
+			public static extern void SetAudioTrack(System.IntPtr instance, int index);
+
+			[DllImport("AVProVideo")]
+			public static extern float GetBufferingProgress(System.IntPtr instance);
+
+			[DllImport("AVProVideo")]
+			public static extern int GetBufferedRanges(System.IntPtr instance, float[] timeArray, int arrayCount);
+
 			// Update and Rendering
 
 			[DllImport("AVProVideo")]
@@ -622,12 +794,11 @@ namespace RenderHeads.Media.AVProVideo
 			[DllImport("AVProVideo")]
 			public static extern bool IsTextureTopDown(System.IntPtr instance);
 
-#if USE_MULTI_TEXTURE
-			[DllImport("AVProVideo")]
-			public static extern System.IntPtr GetTexturePointers(System.IntPtr instance, int index);
-#endif
 			[DllImport("AVProVideo")]
 			public static extern int GetTextureFrameCount(System.IntPtr instance);
+
+			[DllImport("AVProVideo")]
+			public static extern long GetTextureTimeStamp(System.IntPtr instance);
 
 #if AVPROVIDEO_ISSUEPLUGINEVENT_UNITY52
 			[DllImport("AVProVideo")]
@@ -636,6 +807,14 @@ namespace RenderHeads.Media.AVProVideo
 			[DllImport("AVProVideo")]
 			public static extern System.IntPtr GetRenderEventFunc_FreeTextures();
 #endif
+
+			// Audio
+
+			[DllImport("AVProVideo")]
+			public static extern void SetUnityAudioEnabled(System.IntPtr instance, bool enabled);
+
+			[DllImport("AVProVideo")]
+			public static extern void GrabAudio(System.IntPtr instance, float[] buffer, int floatCount, int channelCount);
 		}
 	}
 }
