@@ -52,6 +52,7 @@ public class DemoApp : MonoBehaviour {
 		//app.mainCamera.SetActive (false);
 		app.videoCamera.SetActive (true);
 
+		// play video file
 		_mediaPlayer.OpenVideoFromFile (
 			MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, 
 			_curVideoFile);
@@ -63,6 +64,9 @@ public class DemoApp : MonoBehaviour {
 		DemoApp app = FindObjectOfType<DemoApp> ();
 		//app.mainCamera.SetActive (true);
 		app.videoCamera.SetActive (false);
+
+		// stop playing video file
+		_mediaPlayer.Stop();
 	}
 
 	// Update is called once per frame
