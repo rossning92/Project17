@@ -7,9 +7,9 @@ public class DemoApp : MonoBehaviour {
 
 	public GameObject mainCamera;
 	public GameObject videoCamera;
+	public float fadeSpeed = 2.0f;
 
 
-	private string _videoFile;
 
 	private enum Status
 	{
@@ -26,11 +26,14 @@ public class DemoApp : MonoBehaviour {
 
 
 	private MediaPlayer _mediaPlayer;
-	private DemoApp _app;
 	private float _fadeTextureAlpha = 0.0f;
+	private string _curVideoFile;
 
-	private float fadeSpeed = 2.0f;
 
+	// Use this for initialization
+	void Start () {
+		_mediaPlayer = (MediaPlayer)FindObjectOfType (typeof(MediaPlayer));
+	}
 
 	private void Fade(GameObject obj, bool fadeOut) {
 		if (fadeOut) {
@@ -43,12 +46,6 @@ public class DemoApp : MonoBehaviour {
 		fadeEffect.SetAlpha (_fadeTextureAlpha);
 	}
 
-	// Use this for initialization
-	void Start () {
-		_mediaPlayer = (MediaPlayer)FindObjectOfType (typeof(MediaPlayer));
-		_app = FindObjectOfType<DemoApp> ();
-	}
-
 	private void SwitchToVideoCamera ()
 	{
 		DemoApp app = FindObjectOfType<DemoApp> ();
@@ -57,7 +54,7 @@ public class DemoApp : MonoBehaviour {
 
 		_mediaPlayer.OpenVideoFromFile (
 			MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, 
-			_videoFile);
+			_curVideoFile);
 		_mediaPlayer.Play ();
 	}
 
@@ -83,7 +80,7 @@ public class DemoApp : MonoBehaviour {
 				SwitchToVideoCamera ();
 				_status = Status.VideoCameraFadeIn;
 			} else {
-				Fade (_app.mainCamera, true);
+				Fade (mainCamera, true);
 			}
 
 		} else if (_status == Status.VideoCameraFadeIn) {
@@ -91,7 +88,7 @@ public class DemoApp : MonoBehaviour {
 			if (_fadeTextureAlpha <= 0.0f) {
 				_status = Status.InVideoCamera;
 			} else {
-				Fade (_app.videoCamera, false);
+				Fade (videoCamera, false);
 			}
 
 		} else if (_status == Status.InVideoCamera) {
@@ -107,7 +104,7 @@ public class DemoApp : MonoBehaviour {
 				SwitchToMainCamera ();
 				_status = Status.MainCameraFadeIn;
 			} else {
-				Fade (_app.videoCamera, true);
+				Fade (videoCamera, true);
 			}
 
 		} else if (_status == Status.MainCameraFadeIn) {
@@ -115,7 +112,7 @@ public class DemoApp : MonoBehaviour {
 			if (_fadeTextureAlpha <= 0.0f) {
 				_status = Status.InMainCamera;
 			} else {
-				Fade (_app.mainCamera, false);
+				Fade (mainCamera, false);
 			}
 
 		}
@@ -124,7 +121,7 @@ public class DemoApp : MonoBehaviour {
 
 	public void StartVideo(string fileName) {
 		_areaEntered = true;
-		_videoFile = fileName;
+		_curVideoFile = fileName;
 	}
 
 	public void StopVideo() {
