@@ -5,11 +5,19 @@ using RenderHeads.Media.AVProVideo;
 
 public class DemoApp : MonoBehaviour {
 
+	public enum VideoSphereType {
+		NormalVideoSphere,
+		VideoSphereWithVRScene,
+		VideoSphereWithViveCamera
+	};
+
 	public Camera mainCamera;
 	public GameObject videoSphere;
 	public float fadeSpeed = 2.0f;
 	private int oldCullingMask;
 	public GameObject fadeEffect;
+	private VideoSphereType _curVideoSphereType;
+
 
 	private enum Status
 	{
@@ -62,10 +70,30 @@ public class DemoApp : MonoBehaviour {
 		videoSphere.SetActive (true);
 
 
-
+		// set culling mask
 		oldCullingMask = mainCamera.cullingMask;
-		mainCamera.cullingMask = 1 << LayerMask.NameToLayer ("VideoSphere")
+		if (_curVideoSphereType == VideoSphereType.NormalVideoSphere) {
+			
+			mainCamera.cullingMask = 1 << LayerMask.NameToLayer ("VideoSphere")
 				| 1 << LayerMask.NameToLayer ("TransparentFX");
+			
+		} else if (_curVideoSphereType == VideoSphereType.VideoSphereWithVRScene) {
+			
+			mainCamera.cullingMask |= 1 << LayerMask.NameToLayer ("VideoSphere")
+				| 1 << LayerMask.NameToLayer ("TransparentFX");
+		
+		}
+
+
+		// set transparency of the video sphere
+		Material mat = videoSphere.GetComponent<Renderer> ().material;
+		Color color = mat.GetColor ("_Color");
+		if (_curVideoSphereType == VideoSphereType.NormalVideoSphere) {
+			color.a = 1;
+		} else if (_curVideoSphereType == VideoSphereType.VideoSphereWithVRScene) {
+			color.a = 0.5f;
+		}
+		mat.SetColor ("_Color", color);
 
 
 		// play video file
@@ -148,9 +176,10 @@ public class DemoApp : MonoBehaviour {
 
 	}
 
-	public void StartVideo(string fileName) {
+	public void StartVideo(string fileName, VideoSphereType type) {
 		_areaEntered = true;
 		_curVideoFile = fileName;
+		_curVideoSphereType = type;
 	}
 
 	public void StopVideo() {

@@ -5,6 +5,7 @@ using UnityEngine;
 public class VideoTrigger : MonoBehaviour {
 	
 	public string videoFile;
+	public DemoApp.VideoSphereType videoSphereType;
 
 	private DemoApp _app;
 
@@ -13,7 +14,7 @@ public class VideoTrigger : MonoBehaviour {
 	}
 
 	void OnTriggerEnter(Collider other) {
-		_app.StartVideo (videoFile);
+		_app.StartVideo (videoFile, videoSphereType);
 	}
 
 	void OnTriggerExit(Collider other) {
