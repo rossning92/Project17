@@ -9,7 +9,7 @@ public class DemoApp : MonoBehaviour {
 	public GameObject videoSphere;
 	public float fadeSpeed = 2.0f;
 	private int oldCullingMask;
-
+	public GameObject fadeEffect;
 
 	private enum Status
 	{
@@ -33,6 +33,8 @@ public class DemoApp : MonoBehaviour {
 	// Use this for initialization
 	void Start () {
 		_mediaPlayer = (MediaPlayer)FindObjectOfType (typeof(MediaPlayer));
+
+		fadeEffect.transform.SetParent(mainCamera.transform, false);
 
 		videoSphere.SetActive (false);
 	}
