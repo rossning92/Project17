@@ -11,14 +11,6 @@ public class DemoApp : MonoBehaviour {
 		VideoSphereWithViveCamera
 	};
 
-	public Camera mainCamera;
-	public GameObject videoSphere;
-	public float fadeSpeed = 2.0f;
-	private int oldCullingMask;
-	public GameObject fadeEffect;
-	private VideoSphereType _curVideoSphereType;
-
-
 	private enum Status
 	{
 		InMainCamera,
@@ -28,23 +20,36 @@ public class DemoApp : MonoBehaviour {
 		VideoCameraFadeOut,
 		MainCameraFadeIn
 	};
+
+	public Camera mainCamera;
+	public GameObject videoSphere;
+	public GameObject fadeEffect;
+	public float fadeSpeed = 2.0f;
+	public MediaPlayer mediaPlayer;
+
+
+	private int _oldCullingMask;
+	private VideoSphereType _curVideoSphereType;
 	private Status _status = Status.InMainCamera;
 	private bool _areaEntered = false;
 	private bool _areaExited = false;
-
-
-	private MediaPlayer _mediaPlayer;
-	private float _fadeTextureAlpha = 0.0f;
+	private float _fadeVal = 0.0f;
 	private string _curVideoFile;
-
+	private List<MediaPlayer> _otherMediaPlayers = new List<MediaPlayer>();
 
 	// Use this for initialization
 	void Start () {
-		_mediaPlayer = (MediaPlayer)FindObjectOfType (typeof(MediaPlayer));
 
 		fadeEffect.transform.SetParent(mainCamera.transform, false);
 
 		videoSphere.SetActive (false);
+
+		// append all media players in the scene other than 'mediaPlayer'
+		foreach (var mp in FindObjectsOfType<MediaPlayer> ()) {
+			if (mp != mediaPlayer)
+				_otherMediaPlayers.Add (mp);
+		}
+
 	}
 
 	private void UpdateVideoSpherePos() {
@@ -53,13 +58,19 @@ public class DemoApp : MonoBehaviour {
 
 	private void Fade(Camera obj, bool fadeOut) {
 		if (fadeOut) {
-			_fadeTextureAlpha += Time.deltaTime * fadeSpeed;
+			_fadeVal += Time.deltaTime * fadeSpeed;
 		} else {
-			_fadeTextureAlpha -= Time.deltaTime * fadeSpeed;
+			_fadeVal -= Time.deltaTime * fadeSpeed;
 		}
 
 		FadeEffect fadeEffect = obj.GetComponentInChildren<FadeEffect> ();
-		fadeEffect.SetAlpha (_fadeTextureAlpha);
+		fadeEffect.SetAlpha (_fadeVal);
+	}
+
+	private void LoadVideoFile ()
+	{
+		mediaPlayer.OpenVideoFromFile (MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, _curVideoFile);
+		mediaPlayer.Control.SetVolume (0);
 	}
 
 	private void SwitchToVideoCamera ()
@@ -71,7 +82,7 @@ public class DemoApp : MonoBehaviour {
 
 
 		// set culling mask
-		oldCullingMask = mainCamera.cullingMask;
+		_oldCullingMask = mainCamera.cullingMask;
 		if (_curVideoSphereType == VideoSphereType.NormalVideoSphere) {
 			
 			mainCamera.cullingMask = 1 << LayerMask.NameToLayer ("VideoSphere")
@@ -97,23 +108,20 @@ public class DemoApp : MonoBehaviour {
 
 
 		// play video file
-		_mediaPlayer.OpenVideoFromFile (
-			MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, 
-			_curVideoFile);
-		_mediaPlayer.Play ();
+		mediaPlayer.Play ();
 	}
 
 	private void SwitchToMainCamera ()
 	{
 		DemoApp app = FindObjectOfType<DemoApp> ();
 
-		mainCamera.cullingMask = oldCullingMask;
+		mainCamera.cullingMask = _oldCullingMask;
 
 		videoSphere.SetActive (false);
 
 
 		// stop playing video file
-		_mediaPlayer.Stop();
+		mediaPlayer.Stop();
 	}
 
 	// Update is called once per frame
@@ -123,25 +131,37 @@ public class DemoApp : MonoBehaviour {
 			if (_areaEntered) {
 				_areaEntered = false;
 				_status = Status.MainCameraFadeOut;
+
+
+				// load video file in advance
+				LoadVideoFile ();
 			}
 
 		} else if (_status == Status.MainCameraFadeOut) {
 
-			if (_fadeTextureAlpha >= 1.0f) {
+			if (_fadeVal >= 1.0f) {
 				SwitchToVideoCamera ();
 				_status = Status.VideoCameraFadeIn;
 			} else {
 				Fade (mainCamera, true);
+
+				// fade out audios in the main scene
+				foreach (var mp in _otherMediaPlayers) {
+					mp.Control.SetVolume (1.0f - _fadeVal);
+				}
 			}
 
 		} else if (_status == Status.VideoCameraFadeIn) {
 
 			UpdateVideoSpherePos ();
 
-			if (_fadeTextureAlpha <= 0.0f) {
+			if (_fadeVal <= 0.0f) {
 				_status = Status.InVideoCamera;
 			} else {
 				Fade (mainCamera, false);
+
+				// fade in audio channel in 360-video
+				mediaPlayer.Control.SetVolume (1.0f - _fadeVal);
 			}
 
 		} else if (_status == Status.InVideoCamera) {
@@ -157,19 +177,27 @@ public class DemoApp : MonoBehaviour {
 
 			UpdateVideoSpherePos ();
 
-			if (_fadeTextureAlpha >= 1.0f) {
+			if (_fadeVal >= 1.0f) {
 				SwitchToMainCamera ();
 				_status = Status.MainCameraFadeIn;
 			} else {
 				Fade (mainCamera, true);
+
+				// fade out audio channel in 360-video
+				mediaPlayer.Control.SetVolume (1.0f - _fadeVal);
 			}
 
 		} else if (_status == Status.MainCameraFadeIn) {
 
-			if (_fadeTextureAlpha <= 0.0f) {
+			if (_fadeVal <= 0.0f) {
 				_status = Status.InMainCamera;
 			} else {
 				Fade (mainCamera, false);
+
+				// fade in audios in the main scene
+				foreach (var mp in _otherMediaPlayers) {
+					mp.Control.SetVolume (1.0f - _fadeVal);
+				}
 			}
 
 		}
