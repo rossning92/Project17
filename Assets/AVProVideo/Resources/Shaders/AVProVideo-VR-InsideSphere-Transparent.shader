@@ -15,10 +15,8 @@
     SubShader
     {
 		Tags { "Queue" = "Transparent" "IgnoreProjector" = "True" "RenderType" = "Transparent" }
-
-		ZWrite Off
-		ZTest Off
-
+		ZWrite On
+		//ZTest Always
 		Blend SrcAlpha OneMinusSrcAlpha
 		Cull Front
 		Lighting Off
