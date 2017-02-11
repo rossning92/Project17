@@ -6,6 +6,7 @@ public class VideoTrigger : MonoBehaviour {
 	
 	public string videoFile;
 	public DemoApp.VideoSphereType videoSphereType;
+	public Transform videoSphereRotation;
 
 	private DemoApp _app;
 
@@ -14,7 +15,7 @@ public class VideoTrigger : MonoBehaviour {
 	}
 
 	void OnTriggerEnter(Collider other) {
-		_app.StartVideo (videoFile, videoSphereType);
+		_app.StartVideo (videoFile, videoSphereType, videoSphereRotation);
 	}
 
 	void OnTriggerExit(Collider other) {
