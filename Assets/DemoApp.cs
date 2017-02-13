@@ -7,7 +7,7 @@ public class DemoApp : MonoBehaviour {
 
 	public enum VideoSphereType {
 		NormalVideoSphere,
-		VideoSphereWithVRScene,
+		TransparentVideoSphere,
 		VideoSphereWithViveCamera
 	};
 
@@ -90,7 +90,7 @@ public class DemoApp : MonoBehaviour {
 			mainCamera.cullingMask = 1 << LayerMask.NameToLayer ("VideoSphere")
 				| 1 << LayerMask.NameToLayer ("TransparentFX");
 			
-		} else if (_curVideoSphereType == VideoSphereType.VideoSphereWithVRScene) {
+		} else if (_curVideoSphereType == VideoSphereType.TransparentVideoSphere) {
 			
 			mainCamera.cullingMask |= 1 << LayerMask.NameToLayer ("VideoSphere")
 				| 1 << LayerMask.NameToLayer ("TransparentFX");
@@ -103,8 +103,13 @@ public class DemoApp : MonoBehaviour {
 		Color color = mat.GetColor ("_Color");
 		if (_curVideoSphereType == VideoSphereType.NormalVideoSphere) {
 			color.a = 1;
-		} else if (_curVideoSphereType == VideoSphereType.VideoSphereWithVRScene) {
-			color.a = 0.5f;
+
+			mediaPlayer.m_AlphaPacking = AlphaPacking.None;
+
+		} else if (_curVideoSphereType == VideoSphereType.TransparentVideoSphere) {
+			color.a = 1;
+
+			mediaPlayer.m_AlphaPacking = AlphaPacking.LeftRight;
 		}
 		mat.SetColor ("_Color", color);
 
