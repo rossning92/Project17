@@ -90,14 +90,23 @@ public class DemoApp : MonoBehaviour {
 		_oldCullingMask = mainCamera.cullingMask;
 		if (_curVideoSphereType == VideoSphereType.NormalVideoSphere) {
 			
-			mainCamera.cullingMask = 1 << LayerMask.NameToLayer ("VideoSphere")
-				| 1 << LayerMask.NameToLayer ("TransparentFX");
+			mainCamera.cullingMask = 
+				1 << LayerMask.NameToLayer ("VideoSphere") |
+				1 << LayerMask.NameToLayer ("TransparentFX");
 			
 		} else if (_curVideoSphereType == VideoSphereType.TransparentVideoSphere) {
 			
-			mainCamera.cullingMask |= 1 << LayerMask.NameToLayer ("VideoSphere")
-				| 1 << LayerMask.NameToLayer ("TransparentFX");
+			mainCamera.cullingMask |= 
+				1 << LayerMask.NameToLayer ("VideoSphere") |
+				1 << LayerMask.NameToLayer ("TransparentFX");
 		
+		} else {
+
+			// only video sphere and FX are visible
+			mainCamera.cullingMask = 
+				1 << LayerMask.NameToLayer ("VideoSphere") |
+				1 << LayerMask.NameToLayer ("TransparentFX");
+
 		}
 
 
@@ -105,14 +114,20 @@ public class DemoApp : MonoBehaviour {
 		Material mat = videoSphere.GetComponent<Renderer> ().material;
 		Color color = mat.GetColor ("_Color");
 		if (_curVideoSphereType == VideoSphereType.NormalVideoSphere) {
-			color.a = 1;
 
+			color.a = 1;
 			mediaPlayer.m_AlphaPacking = AlphaPacking.None;
 
 		} else if (_curVideoSphereType == VideoSphereType.TransparentVideoSphere) {
-			color.a = 1;
 
+			color.a = 1;
 			mediaPlayer.m_AlphaPacking = AlphaPacking.LeftRight;
+
+		} else {
+
+			color.a = 1;
+			mediaPlayer.m_AlphaPacking = AlphaPacking.None;
+
 		}
 		mat.SetColor ("_Color", color);
 
