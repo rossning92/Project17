@@ -26,6 +26,7 @@ public class DemoApp : MonoBehaviour {
 	public GameObject fadeEffect;
 	public float fadeSpeed = 2.0f;
 	public MediaPlayer mediaPlayer;
+	public GameObject viveCamera;
 
 
 	private int _oldCullingMask;
@@ -136,6 +137,11 @@ public class DemoApp : MonoBehaviour {
 		_initVideoSphereRotY = -mainCamera.transform.rotation.eulerAngles.y;
 
 
+		if (_curVideoSphereType == VideoSphereType.VideoSphereWithViveCamera) {
+			viveCamera.SetActive (true);
+		}
+
+
 		// play video file
 		mediaPlayer.Play ();
 	}
@@ -147,7 +153,7 @@ public class DemoApp : MonoBehaviour {
 		mainCamera.cullingMask = _oldCullingMask;
 
 		videoSphere.SetActive (false);
-
+		viveCamera.SetActive (false);
 
 		// stop playing video file
 		mediaPlayer.Stop();
