@@ -12,6 +12,9 @@
 	{
 		Tags { "RenderType"="Transparent" "IgnoreProjector"="True" "Queue"="Transparent" }
 		LOD 100
+
+		ZTest Off
+
 		ZWrite Off
 		Blend SrcAlpha OneMinusSrcAlpha
 		Lighting Off
