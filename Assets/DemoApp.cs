@@ -31,6 +31,7 @@ public class DemoApp : MonoBehaviour {
 	private int _oldCullingMask;
 	private VideoSphereType _curVideoSphereType;
 	private Transform _curVideoSphereRotation;
+	private float _initVideoSphereRotY;
 	private Status _status = Status.InMainCamera;
 	private bool _areaEntered = false;
 	private bool _areaExited = false;
@@ -55,7 +56,9 @@ public class DemoApp : MonoBehaviour {
 
 	private void UpdateVideoSpherePos() {
 		videoSphere.transform.position = mainCamera.transform.position;
+
 		videoSphere.transform.rotation = _curVideoSphereRotation.rotation;
+		videoSphere.transform.Rotate (0, _initVideoSphereRotY, 0);
 	}
 
 	private void Fade(Camera obj, bool fadeOut) {
@@ -112,6 +115,10 @@ public class DemoApp : MonoBehaviour {
 			mediaPlayer.m_AlphaPacking = AlphaPacking.LeftRight;
 		}
 		mat.SetColor ("_Color", color);
+
+
+		// get current camera rotation when entering video sphere 
+		_initVideoSphereRotY = -mainCamera.transform.rotation.eulerAngles.y;
 
 
 		// play video file
