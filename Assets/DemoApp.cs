@@ -161,11 +161,9 @@ public class DemoApp : MonoBehaviour {
 
 		mainCamera.cullingMask = _oldCullingMask;
 
+
 		videoSphere.SetActive (false);
 		viveCamera.SetActive (false);
-
-
-		_currentVideoTrigger = null;
 
 
 		// stop playing video file
