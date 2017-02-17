@@ -8,17 +8,23 @@ public class VideoTrigger : MonoBehaviour {
 	public DemoApp.VideoSphereType videoSphereType;
 	public Transform videoSphereRotation;
 
+
 	private DemoApp _app;
+
 
 	void Start() {
 		_app = (DemoApp)FindObjectOfType (typeof(DemoApp));
 	}
 
 	void OnTriggerEnter(Collider other) {
-		_app.StartVideo (videoFile, videoSphereType, videoSphereRotation);
+		_app.StartVideo (this);
 	}
 
 	void OnTriggerExit(Collider other) {
 		_app.StopVideo ();
+	}
+
+	public bool IsTriggerActive() {
+		return _app.GetCurrentVideoTrigger () == this;
 	}
 }

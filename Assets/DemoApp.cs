@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using UnityEngine;
 using RenderHeads.Media.AVProVideo;
 
+[DisallowMultipleComponent]
 public class DemoApp : MonoBehaviour {
+
 
 	public enum VideoSphereType {
 		NormalVideoSphere,
@@ -21,24 +23,25 @@ public class DemoApp : MonoBehaviour {
 		MainCameraFadeIn
 	};
 
+
 	public Camera mainCamera;
 	public GameObject videoSphere;
 	public GameObject fadeEffect;
 	public float fadeSpeed = 2.0f;
 	public MediaPlayer mediaPlayer;
 	public GameObject viveCamera;
+	public AudioReverbFilter videoSphereReverbFilter;
 
 
 	private int _oldCullingMask;
-	private VideoSphereType _curVideoSphereType;
-	private Transform _curVideoSphereRotation;
 	private float _initVideoSphereRotY;
 	private Status _status = Status.InMainCamera;
 	private bool _areaEntered = false;
 	private bool _areaExited = false;
 	private float _fadeVal = 0.0f;
-	private string _curVideoFile;
 	private List<MediaPlayer> _otherMediaPlayers = new List<MediaPlayer>();
+	private VideoTrigger _currentVideoTrigger;
+
 
 	// Use this for initialization
 	void Start () {
@@ -58,7 +61,7 @@ public class DemoApp : MonoBehaviour {
 	private void UpdateVideoSpherePos() {
 		videoSphere.transform.position = mainCamera.transform.position;
 
-		videoSphere.transform.rotation = _curVideoSphereRotation.rotation;
+		videoSphere.transform.rotation = _currentVideoTrigger.videoSphereRotation.rotation;
 		videoSphere.transform.Rotate (0, _initVideoSphereRotY, 0);
 	}
 
@@ -75,7 +78,8 @@ public class DemoApp : MonoBehaviour {
 
 	private void LoadVideoFile ()
 	{
-		mediaPlayer.OpenVideoFromFile (MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, _curVideoFile);
+		string fileName = _currentVideoTrigger.videoFile;
+		mediaPlayer.OpenVideoFromFile (MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, fileName);
 		mediaPlayer.Control.SetVolume (0);
 	}
 
@@ -86,16 +90,17 @@ public class DemoApp : MonoBehaviour {
 
 		videoSphere.SetActive (true);
 
+		VideoSphereType sphereType = _currentVideoTrigger.videoSphereType;
 
 		// set culling mask
 		_oldCullingMask = mainCamera.cullingMask;
-		if (_curVideoSphereType == VideoSphereType.NormalVideoSphere) {
+		if (sphereType == VideoSphereType.NormalVideoSphere) {
 			
 			mainCamera.cullingMask = 
 				1 << LayerMask.NameToLayer ("VideoSphere") |
 				1 << LayerMask.NameToLayer ("TransparentFX");
 			
-		} else if (_curVideoSphereType == VideoSphereType.TransparentVideoSphere) {
+		} else if (sphereType == VideoSphereType.TransparentVideoSphere) {
 			
 			mainCamera.cullingMask |= 
 				1 << LayerMask.NameToLayer ("VideoSphere") |
@@ -114,12 +119,12 @@ public class DemoApp : MonoBehaviour {
 		// set transparency of the video sphere
 		Material mat = videoSphere.GetComponent<Renderer> ().material;
 		Color color = mat.GetColor ("_Color");
-		if (_curVideoSphereType == VideoSphereType.NormalVideoSphere) {
+		if (sphereType == VideoSphereType.NormalVideoSphere) {
 
 			color.a = 1;
 			mediaPlayer.m_AlphaPacking = AlphaPacking.None;
 
-		} else if (_curVideoSphereType == VideoSphereType.TransparentVideoSphere) {
+		} else if (sphereType == VideoSphereType.TransparentVideoSphere) {
 
 			color.a = 1;
 			mediaPlayer.m_AlphaPacking = AlphaPacking.LeftRight;
@@ -137,7 +142,7 @@ public class DemoApp : MonoBehaviour {
 		_initVideoSphereRotY = -mainCamera.transform.rotation.eulerAngles.y;
 
 
-		if (_curVideoSphereType == VideoSphereType.VideoSphereWithViveCamera) {
+		if (sphereType == VideoSphereType.VideoSphereWithViveCamera) {
 			viveCamera.SetActive (true);
 		}
 
@@ -154,6 +159,10 @@ public class DemoApp : MonoBehaviour {
 
 		videoSphere.SetActive (false);
 		viveCamera.SetActive (false);
+
+
+		_currentVideoTrigger = null;
+
 
 		// stop playing video file
 		mediaPlayer.Stop();
@@ -239,15 +248,16 @@ public class DemoApp : MonoBehaviour {
 
 	}
 
-	public void StartVideo(string fileName, VideoSphereType type, Transform videoSphereRotation) {
+	public void StartVideo(VideoTrigger videoTrigger) {
 		_areaEntered = true;
-		_curVideoFile = fileName;
-		_curVideoSphereType = type;
-		_curVideoSphereRotation = videoSphereRotation;
+		_currentVideoTrigger = videoTrigger;
 	}
 
 	public void StopVideo() {
 		_areaExited = true;
 	}
 
+	public VideoTrigger GetCurrentVideoTrigger() {
+		return _currentVideoTrigger;
+	}
 }
