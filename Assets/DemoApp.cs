@@ -6,6 +6,7 @@ using RenderHeads.Media.AVProVideo;
 [DisallowMultipleComponent]
 public class DemoApp : MonoBehaviour {
 
+	public static DemoApp Instance;
 
 	public enum VideoSphereType {
 		NormalVideoSphere,
@@ -46,6 +47,8 @@ public class DemoApp : MonoBehaviour {
 	// Use this for initialization
 	void Start () {
 
+		Instance = this;
+
 		fadeEffect.transform.SetParent(mainCamera.transform, false);
 
 		videoSphere.SetActive (false);
@@ -61,8 +64,9 @@ public class DemoApp : MonoBehaviour {
 	private void UpdateVideoSpherePos() {
 		videoSphere.transform.position = mainCamera.transform.position;
 
-		videoSphere.transform.rotation = _currentVideoTrigger.videoSphereRotation.rotation;
+		videoSphere.transform.rotation = new Quaternion ();
 		videoSphere.transform.Rotate (0, _initVideoSphereRotY, 0);
+		videoSphere.transform.Rotate (_currentVideoTrigger.videoSphereRotation.rotation.eulerAngles);
 	}
 
 	private void Fade(Camera obj, bool fadeOut) {
@@ -139,7 +143,7 @@ public class DemoApp : MonoBehaviour {
 
 
 		// get current camera rotation when entering video sphere 
-		_initVideoSphereRotY = -mainCamera.transform.rotation.eulerAngles.y;
+		_initVideoSphereRotY = mainCamera.transform.rotation.eulerAngles.y;
 
 
 		if (sphereType == VideoSphereType.VideoSphereWithViveCamera) {
@@ -259,5 +263,12 @@ public class DemoApp : MonoBehaviour {
 
 	public VideoTrigger GetCurrentVideoTrigger() {
 		return _currentVideoTrigger;
+	}
+
+	public float GetRotationYInVideoSphere() {
+		float rotY = mainCamera.transform.rotation.eulerAngles.y - _initVideoSphereRotY;
+		while (rotY < 0)
+			rotY += 360.0f;
+		return rotY;
 	}
 }
