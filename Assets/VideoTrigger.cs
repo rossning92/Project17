@@ -7,6 +7,7 @@ public class VideoTrigger : MonoBehaviour {
 	public string videoFile;
 	public DemoApp.VideoSphereType videoSphereType;
 	public Transform videoSphereRotation;
+	public float RestartVideoAfterSecs = 0;
 
 
 	private DemoApp _app;

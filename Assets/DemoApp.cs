@@ -42,6 +42,9 @@ public class DemoApp : MonoBehaviour {
 	private float _fadeVal = 0.0f;
 	private List<MediaPlayer> _otherMediaPlayers = new List<MediaPlayer>();
 	private VideoTrigger _currentVideoTrigger;
+	private Dictionary<VideoTrigger, float> _lastVideoPosMs = new Dictionary<VideoTrigger, float>();
+	private Dictionary<VideoTrigger, float> _restartTimeInSecs = new Dictionary<VideoTrigger, float>();
+	private bool _seekFinished = false;
 
 
 	// Use this for initialization
@@ -83,8 +86,9 @@ public class DemoApp : MonoBehaviour {
 	private void LoadVideoFile ()
 	{
 		string fileName = _currentVideoTrigger.videoFile;
-		mediaPlayer.OpenVideoFromFile (MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, fileName);
+		mediaPlayer.OpenVideoFromFile (MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, fileName, false);
 		mediaPlayer.Control.SetVolume (0);
+		_seekFinished = false;
 	}
 
 	private void SwitchToVideoCamera ()
@@ -153,6 +157,7 @@ public class DemoApp : MonoBehaviour {
 
 		// play video file
 		mediaPlayer.Play ();
+		_seekFinished = false;
 	}
 
 	private void SwitchToMainCamera ()
@@ -186,8 +191,10 @@ public class DemoApp : MonoBehaviour {
 		} else if (_status == Status.MainCameraFadeOut) {
 
 			if (_fadeVal >= 1.0f) {
+				
 				SwitchToVideoCamera ();
 				_status = Status.VideoCameraFadeIn;
+
 			} else {
 				Fade (mainCamera, true);
 
@@ -198,6 +205,8 @@ public class DemoApp : MonoBehaviour {
 			}
 
 		} else if (_status == Status.VideoCameraFadeIn) {
+
+			TrySeekVideo ();
 
 			UpdateVideoSpherePos ();
 
@@ -212,11 +221,22 @@ public class DemoApp : MonoBehaviour {
 
 		} else if (_status == Status.InVideoCamera) {
 
+			TrySeekVideo ();
+
 			UpdateVideoSpherePos ();
 
 			if (_areaExited) {
 				_areaExited = false;
 				_status = Status.VideoCameraFadeOut;
+
+				// save current video pos
+				float t = mediaPlayer.Control.GetCurrentTimeMs();
+				_lastVideoPosMs [_currentVideoTrigger] = t;
+
+				t = _currentVideoTrigger.RestartVideoAfterSecs;
+				if (t > 0) {
+					_restartTimeInSecs [_currentVideoTrigger] = Time.time + t;
+				}
 			}
 
 		} else if (_status == Status.VideoCameraFadeOut) {
@@ -268,5 +288,19 @@ public class DemoApp : MonoBehaviour {
 		while (rotY < 0)
 			rotY += 360.0f;
 		return rotY;
+	}
+
+	private void TrySeekVideo() {
+		if (!_seekFinished && mediaPlayer.Control.IsPlaying()) {
+
+			// Check if we need to resume the video
+			float t = _restartTimeInSecs.ContainsKey (_currentVideoTrigger) ? _restartTimeInSecs [_currentVideoTrigger] : 0;
+			if (t > Time.time) {
+				mediaPlayer.Control.Seek (_lastVideoPosMs [_currentVideoTrigger]);
+				Debug.Log ("SeekTo: " + _lastVideoPosMs [_currentVideoTrigger]);
+				_seekFinished = true;
+			}
+
+		}
 	}
 }
