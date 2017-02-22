@@ -42,8 +42,8 @@ public class DemoApp : MonoBehaviour {
 	private float _fadeVal = 0.0f;
 	private List<MediaPlayer> _otherMediaPlayers = new List<MediaPlayer>();
 	private VideoTrigger _currentVideoTrigger;
-	private Dictionary<VideoTrigger, float> _lastVideoPosMs = new Dictionary<VideoTrigger, float>();
-	private Dictionary<VideoTrigger, float> _restartTimeInSecs = new Dictionary<VideoTrigger, float>();
+	private Dictionary<VideoTrigger, float> _videoPosMs = new Dictionary<VideoTrigger, float>();
+	private Dictionary<VideoTrigger, float> _videoRestartTimeSecs = new Dictionary<VideoTrigger, float>();
 	private bool _seekFinished = false;
 
 
@@ -231,11 +231,11 @@ public class DemoApp : MonoBehaviour {
 
 				// save current video pos
 				float t = mediaPlayer.Control.GetCurrentTimeMs();
-				_lastVideoPosMs [_currentVideoTrigger] = t;
+				_videoPosMs [_currentVideoTrigger] = t;
 
 				t = _currentVideoTrigger.RestartVideoAfterSecs;
 				if (t > 0) {
-					_restartTimeInSecs [_currentVideoTrigger] = Time.time + t;
+					_videoRestartTimeSecs [_currentVideoTrigger] = Time.time + t;
 				}
 			}
 
@@ -294,10 +294,10 @@ public class DemoApp : MonoBehaviour {
 		if (!_seekFinished && mediaPlayer.Control.IsPlaying()) {
 
 			// Check if we need to resume the video
-			float t = _restartTimeInSecs.ContainsKey (_currentVideoTrigger) ? _restartTimeInSecs [_currentVideoTrigger] : 0;
+			float t = _videoRestartTimeSecs.ContainsKey (_currentVideoTrigger) ? _videoRestartTimeSecs [_currentVideoTrigger] : 0;
 			if (t > Time.time) {
-				mediaPlayer.Control.Seek (_lastVideoPosMs [_currentVideoTrigger]);
-				Debug.Log ("SeekTo: " + _lastVideoPosMs [_currentVideoTrigger]);
+				mediaPlayer.Control.Seek (_videoPosMs [_currentVideoTrigger]);
+				Debug.Log ("SeekTo: " + _videoPosMs [_currentVideoTrigger]);
 				_seekFinished = true;
 			}
 
