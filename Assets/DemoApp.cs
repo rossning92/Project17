@@ -28,7 +28,6 @@ public class DemoApp : MonoBehaviour {
 	public Camera mainCamera;
 	public GameObject videoSphere;
 	public GameObject fadeEffect;
-	public float fadeSpeed = 2.0f;
 	public MediaPlayer mediaPlayer;
 	public GameObject viveCamera;
 	public AudioReverbFilter videoSphereReverbFilter;
@@ -74,9 +73,9 @@ public class DemoApp : MonoBehaviour {
 
 	private void Fade(Camera obj, bool fadeOut) {
 		if (fadeOut) {
-			_fadeVal += Time.deltaTime * fadeSpeed;
+			_fadeVal += Time.deltaTime * _currentVideoTrigger.fadeSpeed;
 		} else {
-			_fadeVal -= Time.deltaTime * fadeSpeed;
+			_fadeVal -= Time.deltaTime * _currentVideoTrigger.fadeSpeed;
 		}
 
 		FadeEffect fadeEffect = obj.GetComponentInChildren<FadeEffect> ();

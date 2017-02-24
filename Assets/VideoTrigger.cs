@@ -10,6 +10,7 @@ public class VideoTrigger : MonoBehaviour {
 	public float RestartVideoAfterSecs = 0;
 	public float radiusToEnter = 0.5f;
 	public float radiusToExit = 1.0f;
+	public float fadeSpeed = 2.0f;
 
 	private DemoApp _app;
 	private bool _triggered = false;
