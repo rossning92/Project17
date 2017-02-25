@@ -40,7 +40,7 @@ public class DemoApp : MonoBehaviour {
 	private bool _areaExited = false;
 	private float _fadeVal = 0.0f;
 	private List<MediaPlayer> _otherMediaPlayers = new List<MediaPlayer>();
-	private VideoTrigger _currentVideoTrigger;
+	private VideoTrigger _curTrigger;
 	private Dictionary<VideoTrigger, float> _videoPosMs = new Dictionary<VideoTrigger, float>();
 	private Dictionary<VideoTrigger, float> _videoRestartTimeSecs = new Dictionary<VideoTrigger, float>();
 	private bool _seekFinished = false;
@@ -68,14 +68,14 @@ public class DemoApp : MonoBehaviour {
 
 		videoSphere.transform.rotation = new Quaternion ();
 		videoSphere.transform.Rotate (0, _initVideoSphereRotY, 0);
-		videoSphere.transform.Rotate (_currentVideoTrigger.videoSphereRotation.rotation.eulerAngles);
+		videoSphere.transform.Rotate (_curTrigger.videoSphereRotation.rotation.eulerAngles);
 	}
 
-	private void Fade(Camera obj, bool fadeOut) {
+	private void Fade(Camera obj, bool fadeOut, float speed) {
 		if (fadeOut) {
-			_fadeVal += Time.deltaTime * _currentVideoTrigger.fadeSpeed;
+			_fadeVal += Time.deltaTime * speed;
 		} else {
-			_fadeVal -= Time.deltaTime * _currentVideoTrigger.fadeSpeed;
+			_fadeVal -= Time.deltaTime * speed;
 		}
 
 		FadeEffect fadeEffect = obj.GetComponentInChildren<FadeEffect> ();
@@ -84,7 +84,7 @@ public class DemoApp : MonoBehaviour {
 
 	private void LoadVideoFile ()
 	{
-		string fileName = _currentVideoTrigger.videoFile;
+		string fileName = _curTrigger.videoFile;
 		mediaPlayer.OpenVideoFromFile (MediaPlayer.FileLocation.RelativeToStreamingAssetsFolder, fileName, false);
 		mediaPlayer.Control.SetVolume (0);
 		_seekFinished = false;
@@ -97,7 +97,7 @@ public class DemoApp : MonoBehaviour {
 
 		videoSphere.SetActive (true);
 
-		VideoSphereType sphereType = _currentVideoTrigger.videoSphereType;
+		VideoSphereType sphereType = _curTrigger.videoSphereType;
 
 		// set culling mask
 		_oldCullingMask = mainCamera.cullingMask;
@@ -195,7 +195,7 @@ public class DemoApp : MonoBehaviour {
 				_status = Status.VideoCameraFadeIn;
 
 			} else {
-				Fade (mainCamera, true);
+				Fade (mainCamera, true, _curTrigger.fadeInSpeed);
 
 				// fade out audios in the main scene
 				foreach (var mp in _otherMediaPlayers) {
@@ -212,10 +212,13 @@ public class DemoApp : MonoBehaviour {
 			if (_fadeVal <= 0.0f) {
 				_status = Status.InVideoCamera;
 			} else {
-				Fade (mainCamera, false);
+				Fade (mainCamera, false, _curTrigger.fadeInSpeed);
 
 				// fade in audio channel in 360-video
-				mediaPlayer.Control.SetVolume (1.0f - _fadeVal);
+				if (_curTrigger.videoSphereAudioFading)
+					mediaPlayer.Control.SetVolume (1.0f - _fadeVal);
+				else
+					mediaPlayer.Control.SetVolume (1.0f);
 			}
 
 		} else if (_status == Status.InVideoCamera) {
@@ -230,11 +233,11 @@ public class DemoApp : MonoBehaviour {
 
 				// save current video pos
 				float t = mediaPlayer.Control.GetCurrentTimeMs();
-				_videoPosMs [_currentVideoTrigger] = t;
+				_videoPosMs [_curTrigger] = t;
 
-				t = _currentVideoTrigger.RestartVideoAfterSecs;
+				t = _curTrigger.RestartVideoAfterSecs;
 				if (t > 0) {
-					_videoRestartTimeSecs [_currentVideoTrigger] = Time.time + t;
+					_videoRestartTimeSecs [_curTrigger] = Time.time + t;
 				}
 			}
 
@@ -246,7 +249,7 @@ public class DemoApp : MonoBehaviour {
 				SwitchToMainCamera ();
 				_status = Status.MainCameraFadeIn;
 			} else {
-				Fade (mainCamera, true);
+				Fade (mainCamera, true, _curTrigger.fadeOutSpeed);
 
 				// fade out audio channel in 360-video
 				mediaPlayer.Control.SetVolume (1.0f - _fadeVal);
@@ -257,7 +260,7 @@ public class DemoApp : MonoBehaviour {
 			if (_fadeVal <= 0.0f) {
 				_status = Status.InMainCamera;
 			} else {
-				Fade (mainCamera, false);
+				Fade (mainCamera, false, _curTrigger.fadeOutSpeed);
 
 				// fade in audios in the main scene
 				foreach (var mp in _otherMediaPlayers) {
@@ -271,7 +274,7 @@ public class DemoApp : MonoBehaviour {
 
 	public void StartVideo(VideoTrigger videoTrigger) {
 		_areaEntered = true;
-		_currentVideoTrigger = videoTrigger;
+		_curTrigger = videoTrigger;
 	}
 
 	public void StopVideo() {
@@ -279,7 +282,7 @@ public class DemoApp : MonoBehaviour {
 	}
 
 	public VideoTrigger GetCurrentVideoTrigger() {
-		return _currentVideoTrigger;
+		return _curTrigger;
 	}
 
 	public float GetRotationYInVideoSphere() {
@@ -293,10 +296,10 @@ public class DemoApp : MonoBehaviour {
 		if (!_seekFinished && mediaPlayer.Control.IsPlaying()) {
 
 			// Check if we need to resume the video
-			float t = _videoRestartTimeSecs.ContainsKey (_currentVideoTrigger) ? _videoRestartTimeSecs [_currentVideoTrigger] : 0;
+			float t = _videoRestartTimeSecs.ContainsKey (_curTrigger) ? _videoRestartTimeSecs [_curTrigger] : 0;
 			if (t > Time.time) {
-				mediaPlayer.Control.Seek (_videoPosMs [_currentVideoTrigger]);
-				Debug.Log ("SeekTo: " + _videoPosMs [_currentVideoTrigger]);
+				mediaPlayer.Control.Seek (_videoPosMs [_curTrigger]);
+				Debug.Log ("SeekTo: " + _videoPosMs [_curTrigger]);
 				_seekFinished = true;
 			}
 
